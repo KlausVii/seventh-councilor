@@ -38,6 +38,19 @@ Your 90 MB save file is never shipped wholesale — the toolkit is deliberately 
 agent reads analyzer output rather than raw save data. If you'd rather nothing at all leave
 your machine, use Path B.
 
+### 3a. What access does this get to my computer? Is that safe?
+
+Worth separating the two halves. **The scripts**: 34 of 41 are read-only and fully offline,
+there are no third-party dependencies and no telemetry, exactly one file makes network calls
+(`fetch_ladder.py`, for wiki research — not part of save analysis), and exactly one writes to a
+save (`ti_war_editor.py`, only when you ask, backing up first).
+
+**The agent** is where the real risk sits: an AI coding agent has whatever access you grant it,
+it's non-deterministic, and that's its permission model rather than anything this repo adds.
+That's a fair thing to be cautious about. [SECURITY.md](../SECURITY.md) has the full breakdown,
+the grep commands to verify every claim yourself, and options for running it isolated — or with
+no agent at all, which is a supported path, not a fallback.
+
 ### 4. Will it work with my version of the game? With mods?
 
 Mods, yes — better than you'd expect. The repo ships **no** game data. At setup it copies the

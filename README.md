@@ -54,6 +54,12 @@ Working without an agent? The manual setup is three commands — see `docs/setup
 **Hit a wrong number, or want an analyzer that doesn't exist?** You can fix it yourself — your
 agent does most of the work. See [Contributing](#contributing) below.
 
+**Wondering what this actually gets access to?** [SECURITY.md](SECURITY.md) separates what the
+scripts do (34 of 41 are read-only and fully offline; no dependencies, no telemetry) from what
+an AI agent does (whatever you grant it — that's the agent's permission model, not this repo's),
+with commands to verify all of it yourself and notes on running it isolated or with no agent
+at all.
+
 ## Requirements
 
 - Terra Invicta (any platform; save paths auto-detected for Windows, macOS/CrossOver, Linux/Proton)
