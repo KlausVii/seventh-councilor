@@ -1,0 +1,24 @@
+{
+  "_comment": "Copy to config.json and edit. config.json is gitignored — it is yours.",
+
+  "save_dir": null,
+  "_save_dir_help": "Absolute path to your TerraInvicta/Saves folder. Leave null to auto-detect (Windows, macOS/CrossOver, Linux/Proton, WSL).",
+
+  "game_install_dir": null,
+  "_game_install_dir_help": "Absolute path to the Terra Invicta install (the folder containing TerraInvicta_Data). Leave null to auto-detect from Steam library locations. Used by sync_game_data.py.",
+
+  "faction": null,
+  "_faction_help": "REQUIRED. Your faction templateName: ResistCouncil, ExploitCouncil, SubmitCouncil, AppeaseCouncil, CooperateCouncil, DestroyCouncil, EscapeCouncil. Scripts refuse to guess — set it (or pass --faction).",
+
+  "anchor_nations": null,
+  "_anchor_nations_help": "Your 3-5 key nations for trend tracking (campaign-log Tables E/H), as nation templateNames e.g. [\"2026_USA\", \"2026_CHN\", \"2026_RUS\"]. Leave null to auto-detect the top 3 nations by GDP among those where your faction holds a control point. Changing anchors mid-campaign breaks log-column comparability.",
+
+  "research_rate_pct": 100,
+  "_research_rate_help": "Your campaign's research-rate setting. In-game RP cost = template cost x (100 / this). At 200, costs are template / 2. Used by cost-computing scripts.",
+
+  "alien_progression_pct": 100,
+  "_alien_progression_help": "Your campaign's alien-progression setting. Scripts read the live value from your save; this copy is a fallback and a hint for the AI agent's reasoning (event timing, hate math).",
+
+  "difficulty": "Normal",
+  "_difficulty_help": "Cinematic, Normal, Veteran, or Brutal. Scripts read difficulty from your save; this copy is a fallback and a hint for the AI agent's reasoning (several constants are difficulty-keyed)."
+}

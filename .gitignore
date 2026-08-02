@@ -1,0 +1,27 @@
+# Game data mirrored from the user's own install (never committed — see docs/setup.md)
+scripts/templates/
+scripts/localization/
+
+# Per-user campaign configuration
+config.json
+
+# Generated reference pages (rebuild with generate_vault.py / generate_modules.py)
+generated/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+
+# Local Claude Code state
+.claude/settings.local.json
+# The campaign workspace is per-user: ignore everything except the README
+campaign/*
+!campaign/README.md
+
+# Machine-local Claude instructions (per-user, never committed)
+CLAUDE.local.md

@@ -1,0 +1,3 @@
+# Normalize line endings: repo is LF; Windows checkouts get LF too (scripts break on CRLF shebangs)
+* text=auto eol=lf
+*.png binary
