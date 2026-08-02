@@ -63,6 +63,52 @@ Pick the level you're comfortable with:
 - **Back up a save before any edit.** Only `ti_war_editor.py` writes to saves, and it backs up
   on its own, but Terra Invicta's own saves are cheap to copy and there's no reason not to.
 
+## Running it in a container
+
+A `Dockerfile` is included for running the analyzers isolated. It builds an image with no
+dependencies — the analyzers are standard-library only, so there is no `pip install` step and
+nothing is fetched at build time beyond the base image.
+
+```bash
+docker build -t seventh-councilor .
+
+docker run --rm -it \
+  --network none \
+  -v "$PWD:/app" \
+  -v "/path/to/TerraInvicta/Saves:/saves:ro" \
+  -v "/path/to/Terra Invicta:/game:ro" \
+  --user "$(id -u):$(id -g)" \
+  seventh-councilor
+```
+
+What each flag buys you:
+
+- **`--network none`** — the container has no network at all. Worth noting this *works*: the
+  save analyzers never make a network call, so nothing breaks. (The one exception is
+  `fetch_ladder.py`, which fetches wiki pages when researching a mechanic — drop the flag if
+  you want that, and only then.)
+- **`:ro` on `/saves` and `/game`** — read-only. The container cannot modify your saves or your
+  game install, regardless of what runs inside it.
+- **`-v "$PWD:/app"`** — your checkout, so `config.json` and the mirrored templates persist
+  between runs instead of vanishing with the container.
+- **`--user "$(id -u):$(id -g)"`** — files the container writes into your checkout stay owned
+  by you.
+
+Then point the config at the mounted paths, in `config.json`:
+
+```json
+{ "save_dir": "/saves", "game_install_dir": "/game" }
+```
+
+and run the tools as normal — `python3 scripts/setup_campaign.py`, then
+`python3 scripts/extract_snapshot.py --newest --brief`, and so on.
+
+**What this does and doesn't cover.** It isolates the *scripts*, which were the smaller half of
+the risk to begin with. It does not containerize an AI agent — that's a harder problem (the
+agent needs credentials, network, and a writable workspace, which gives back much of what the
+container took away), and pretending otherwise would be worse than not shipping it. If you want
+the agent isolated too, a VM is the honest answer today. Ideas and PRs welcome.
+
 ## Audit it yourself
 
 The claims above are greppable. From the repo root:

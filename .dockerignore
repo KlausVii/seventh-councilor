@@ -1,0 +1,31 @@
+# Keep personal and game data out of any image you build.
+# These are gitignored too — this file makes sure `docker build` doesn't bake them in
+# from a working checkout that already has them.
+
+.git
+.gitignore
+.gitattributes
+
+# Your campaign workspace and config
+campaign/*
+!campaign/README.md
+config.json
+CLAUDE.local.md
+
+# Game data mirrored from your own install — never redistribute
+scripts/templates/
+scripts/localization/
+
+# Derived
+generated/
+__pycache__/
+**/__pycache__/
+*.pyc
+.venv/
+
+# Local agent state
+.claude/settings.local.json
+
+# OS noise
+.DS_Store
+Thumbs.db
