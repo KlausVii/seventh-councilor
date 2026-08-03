@@ -1112,6 +1112,62 @@ def _demo_calibration_bc() -> None:
               f"{delta:>+6,.0f}  {combat_g:>13.3f}  {measured[x]['combat_g']:>13.3f}")
 
 
+# ============================================================
+# Build time — HULL ONLY
+# ============================================================
+# `TIShipHullTemplate.baseConstructionTime_days` is the WHOLE design-side story:
+# armor points, tanks, weapons, mass and construction COST change nothing about how
+# long a ship takes. Player-verified 2033-11 (a Lancer at 45,300 t and a stripped one
+# quote the same days). So "trim the design to field it sooner" is FALSE — fielding
+# sooner means a smaller HULL. See LESSONS-ships S28.
+#
+# The shipbuilder's three numbers are the yard TIERS: SpaceDock (t1) / Shipyard (t2) /
+# Spaceworks (t3) — `TIHabModuleTemplate.constructionTimeModifier` 1.0 / 0.8 / 0.6.
+# Calibrated on an EMPTY Battlecruiser (base 180) reading 205 / 137 / 82 on 2033-11-20:
+YARD_TIER_FACTORS: Tuple[float, float, float] = (1.139, 0.761, 0.456)
+# Cross-checked against a Lancer (base 240): 4/3 × (205, 137, 82) = (273, 183, 109), and the
+# player's Lancer read 410 / 274 / 182 = the SAME ladder one column over (no Spaceworks yet
+# that month). Build time is therefore strictly proportional to baseConstructionTime_days.
+#
+# ⚠ UNRESOLVED: the observed column ratios are 1 : 0.667 : 0.400, which the yard modifiers
+# alone (1 : 0.8 : 0.6) do NOT produce. They match the yard modifier × the matching
+# Nanofactory-line modifier (ConstructionModule 0.9 / Nanofactory 0.75 / NanofacturingComplex
+# 0.6 → 0.9 : 0.6 : 0.36 = 1 : 0.667 : 0.4) exactly — likely, but unverified. There is also a
+# constant ~1.266 between the template product and the displayed days (205 = 180 × 0.9 ×
+# 1.266), source unknown (difficulty/faction/tech). So these factors are CAMPAIGN-calibrated:
+# re-read one empty hull's triple after any yard or construction-module change.
+
+
+def hull_build_days(hull: str, tier: Optional[int] = None) -> Any:
+    """Build time in days for `hull`. tier 0=slowest…2=fastest yard; None = all three.
+
+    >>> hull_build_days('Lancer')          # doctest: +SKIP
+    (410.0, 274.1, 182.0)
+    """
+    base = hull_template(hull)['baseConstructionTime_days']
+    days = tuple(round(base * f, 1) for f in YARD_TIER_FACTORS)
+    return days if tier is None else days[tier]
+
+
+def print_build_times(hulls: Optional[List[str]] = None) -> None:
+    """Rank buildable human hulls by build time — the ONLY design lever on schedule."""
+    if hulls is None:
+        hulls = [n for n, h in _load_template('TIShipHullTemplate.json').items()
+                 if not n.startswith('Alien') and not h.get('noShipyardBuild')
+                 and h.get('dataName') == n]
+    rows = sorted({h: hull_template(h)['baseConstructionTime_days'] for h in hulls}.items(),
+                  key=lambda kv: kv[1])
+    print(f"{'hull':<16}{'base days':>10}{'slow yard':>11}{'mid':>8}{'best':>8}")
+    for h, base in rows:
+        s, m, f = hull_build_days(h)
+        print(f'{h:<16}{base:>10}{s:>11.0f}{m:>8.0f}{f:>8.0f}')
+    print('\nBuild time is hull-only: armor/tanks/mass/cost do not change it (S28).')
+
+
 if __name__ == '__main__':
-    _demo_baseline()
-    _demo_calibration_bc()
+    import sys
+    if '--build-times' in sys.argv:
+        print_build_times()
+    else:
+        _demo_baseline()
+        _demo_calibration_bc()

@@ -629,8 +629,26 @@ AlienCruiser 320 · AlienBattlecruiser/Battleship/Lancer 360 · AlienDreadnought
 
 **Nothing about the loadout enters.** Armor points, tank count, weapons, wet mass and construction
 COST are all irrelevant to the day count — two designs on the same hull take the same time whether
-they weigh 27 kt or 45 kt. The designer's three numbers are **yard tiers in exact ×1.5 steps**, best
-yard = base × 0.758 (verified: Lancer 240 → **410 / 274 / 182**, and 182 × 1.5 = 273, × 1.5 = 410).
+they weigh 27 kt or 45 kt.
+
+**The three numbers are the yard TIERS** — SpaceDock / Shipyard / Spaceworks,
+`TIHabModuleTemplate.constructionTimeModifier` = 1.0 / 0.8 / 0.6 (alien: 1.0 / 0.75 / 0.5).
+Calibrated on an EMPTY Battlecruiser (base 180) reading **205 / 137 / 82** (2033-11-20 screenshot):
+
+    displayed_days ≈ base_days × (1.139 / 0.761 / 0.456)     # t1 / t2 / t3
+
+Cross-check that also proves the proportionality to `baseConstructionTime_days`: ×4/3 gives a Lancer
+273 / 183 / **109**, and the same campaign's Lancer read **410 / 274 / 182** a month earlier — the
+identical ladder shifted one column, from before its Spaceworks existed. Matched columns agree to
+within a day, so hull base days scale the whole row exactly.
+
+⚠ **Two unresolved gaps — treat the factors as campaign-calibrated, not universal.** The column
+ratios are 1 : 0.667 : 0.400, which the yard modifiers alone (1 : 0.8 : 0.6) do not produce; they
+match the yard modifier × the matching construction-module modifier (ConstructionModule 0.9 /
+Nanofactory 0.75 / NanofacturingComplex 0.6 → 0.9 : 0.6 : 0.36 = 1 : 0.667 : 0.4) exactly, which is
+the likely mechanism but is unverified. And a constant ≈1.266 sits between that template product and
+the displayed days (205 = 180 × 0.9 × 1.266), source unidentified. **Re-read one empty hull's triple
+after any yard or construction-module change** rather than trusting the stored factors.
 
 **Design implications:**
 1. To field a hull SOONER, drop a hull CLASS — never tonnage. Trimming lateral armor or propellant
@@ -641,8 +659,58 @@ yard = base × 0.758 (verified: Lancer 240 → **410 / 274 / 182**, and 182 × 1
 3. Bound it by what the hull can MOUNT, not by days: a Monitor is 120 days but cannot take a 3-nose
    cannon, so it is not a base-cracker at any schedule (see [Orbital Bombardment](../mechanics/Orbital%20Bombardment.md) § laser sizing).
 
+**Tooling:** `python3 scripts/warship_optimizer.py --build-times` prints the whole ladder (base days
++ all three yard tiers) from the templates; `hull_build_days(hull, tier)` is importable. Use it
+instead of quoting days from memory.
+
 **Analyst caveats:** REFITS are a separate, much faster path (in-queue examples run 1.3–19.4 days) —
-never compare a refit ETA to a new-build ETA. And if a single reading doesn't fit the ladder above
-(e.g. "a Battlecruiser in 82 days" when the ladder says 136), suspect a different hull or a refit and
-re-read the designer before theorising a cost term into the model. The ×0.758 / ×1.5 tier factors are
-calibrated from one hull's triple; re-verify them if a yard tech or module tier changes.
+never compare a refit ETA to a new-build ETA. And when a player-reported number doesn't fit your
+ladder, **the ladder is the suspect, not the player**: "a Battlecruiser in 82 days" was dismissed
+here as probably-a-Monitor-refit when it was a straight BC reading, and it was the tier factors —
+back-solved from a single triple taken before that campaign had a Spaceworks — that were wrong. Ask
+for the screenshot before theorising a cost term into the model.
+
+## S29 (2033-11-09, player ground truth) — A hab's DEFENDING FORCE is bigger than its marine modules; read the HABS list, don't reconstruct it
+
+Planning a mine capture with a 6-marine ship, the analyst reconstructed Leibniz Base's ground
+defence from its modules: one **Marine Company Barracks**, `specialRulesValue` 20 → defence 20.
+The player's in-game HABS list read **23**, and the module tooltip confirmed the barracks' own
+"Combat strength: 20". So the module sum **under-reads the real defending force** — by 3 on this
+tier-3 colony (1,103 population). One data point, so no formula is claimed; the residual is
+plausibly a per-hab or population floor.
+
+Rules:
+1. **The HABS list's defence/marine columns are ground truth** and the game shows them for RIVAL
+   habs even at intel 0.1 (verified: Leibniz at intel 0.1 displayed 14 / 23). A module-derived
+   estimate is therefore not privileged information — but it is an estimate, and it reads LOW.
+   `capture_target_planner.py` now plans against `module_sum + 3` and prints the caveat.
+2. **Plan the marines you must BRING, not the odds you happen to have.** With
+   P = 1 − 0.5 × 0.775^(attacker − defender): parity = 50%, +3 = 77%, +6 = 89%, +9 = 95%. Against
+   Leibniz's 23 that means ~29 marine value for a near-sure thing — five times the 6 aboard a
+   single Mjolnir. Sort capture candidates by what you can actually take today; a 470 vol/mo prize
+   you lose your marines against is not a plan.
+3. The raw assault expression goes hugely NEGATIVE when the defender out-numbers the attacker
+   (−8083% at 6 vs 20). Clamp to [0,1] — that is a 0% capture, not a negative probability.
+
+## S30 (2033-11-09, player ground truth) — Rank operations by ETA, never by distance; and check the RETURN ΔV
+
+Recommending capture targets, the analyst sorted by straight-line AU and led with 46 Hestia
+(4.89 AU) and 97 Klotho (4.92 AU). The player opened the in-game transfer planner: **46 Hestia
+38.62 weeks, 97 Klotho 49.27 weeks** — 8.9 and 11.3 months — and replied *"46 Hestia is far.
+97 Klotho is farther. you didn't seem to have checked the time-to-travel."* An equivalent target
+(Pushkin Base, 56 Melete) was **2.7 months** away. Three months of a 584/mo site is ~1,750
+resources; six months of ranking error costs more than any yield difference on the list.
+
+1. **Distance is not travel time and the two do not even rank the same.** ETA depends on the
+   fleet's acceleration and ΔV budget, and a low-thrust hull is accel-limited, not
+   distance-limited. Any tool that ranks destinations MUST print ETA — `transfer_eta.eta_seconds`
+   is importable for exactly this. `capture_target_planner.py` now ranks on it.
+2. **Calibration of the straight-line model vs the in-game planner** (same day, same fleet,
+   182.3 mg, 52.4 kps): 46 Hestia 10.9mo modelled vs 8.9mo actual (**+22%**), 97 Klotho 11.0 vs
+   11.3 (**−3%**), 56 Melete 2.7mo modelled and accepted. ΔV matched to 1% (51.1 modelled vs
+   51.0 / 51.9). So the model is a SCREEN with roughly ±25% error on long legs — it ignores
+   orbital phasing and launch windows entirely. Never quote it as a plan; shortlist with it and
+   read the real number off the in-game planner.
+3. **Check what ΔV the ship has LEFT on arrival.** Every candidate on that list spent 51.1 of
+   52.4 kps getting there — one-way trips. A capture that strands the assault ship at the target
+   is a decision, not a detail; say so before the player commits.
