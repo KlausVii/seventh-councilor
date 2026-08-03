@@ -58,6 +58,10 @@ def main():
     ap.add_argument('--faction', default=None)
     ap.add_argument('--combat-baseline', default='Project_LodestarFissionLantern')
     ap.add_argument('--max-debt', type=int, default=8)
+    ap.add_argument('--exclude', default=None,
+                    help='comma-separated global/project dataNames you refuse to research; '
+                         'any drive whose prereq closure needs one is marked BLOCKED. Use this to '
+                         'answer "what is my ceiling WITHOUT paying for tech X?" (LESSONS-research R28)')
     args = ap.parse_args()
     from ti_config import require_faction
     args.faction = require_faction(args.faction)
@@ -98,10 +102,19 @@ def main():
     def cost(n):
         return (proj.get(n) or tech.get(n) or {}).get('researchCost', 0) or 0
 
+    # --exclude: mark drives whose prereq CLOSURE requires a tech the player refuses to buy.
+    # A whole combat tier is often walled behind 1-2 expensive globals; naming them turns
+    # "what can I get soon?" into "what is my ceiling without them?" (LESSONS-research R28).
+    banned = {x.strip() for x in (args.exclude or '').split(',') if x.strip()}
+
+    def blocked_by(n):
+        return sorted(banned & set(debt(n))) if banned else []
+
     # collapse drive variants → per-project best combat & EV; keep cruise of the
     # max-combat variant (that's the x6) and the drive friendly base name.
     fam = defaultdict(lambda: {'ev': 0, 'combat': 0, 'cruise': 0, 'cap': 0,
-                               'cool': '?', 'reac': '?', 'cls': '?', 'name': None})
+                               'cool': '?', 'reac': '?', 'cls': '?', 'name': None,
+                               'fuel': {}})
     for d in drives:
         pj = d.get('requiredProjectName')
         if not pj:
@@ -114,6 +127,7 @@ def main():
             f['combat'] = cruise * cap; f['cruise'] = cruise; f['cap'] = cap
         f['cool'] = d.get('cooling') or '?'; f['reac'] = d.get('requiredPowerPlant') or '?'
         f['cls'] = d.get('driveClassification') or '?'
+        f['fuel'] = d.get('perTankPropellantMaterials') or f['fuel']
         base = d.get('friendlyName', pj)
         for k, v in DRIVE_FRIENDLY_OVERRIDE.items():
             if (d.get('dataName') or '').startswith(k):
@@ -132,22 +146,43 @@ def main():
         eff_rp = (sum(cost(m) for m in miss) + cost(pj)) / RESEARCH_RATE
         rows.append({
             'pj': pj, 'name': f['name'], 'status': status, 'debt': len(miss),
-            'miss': miss, 'eff_rp': eff_rp,
+            'miss': miss, 'eff_rp': eff_rp, 'blocked': blocked_by(pj) if status=='LOCKED' else [],
             'combat_MN': f['combat'] / 1e6, 'cruise_MN': f['cruise'] / 1e6,
             'ev': f['ev'], 'cap': f['cap'], 'cool': f['cool'], 'cls': f['cls'],
             'fom_combat': (f['combat'] / 1e6) * math.sqrt(max(f['ev'], 1)),
             'fom_transit': (f['cruise'] / 1e6) * math.sqrt(max(f['ev'], 1)),
+            # a drive can be tech-reachable yet unusable: exotic PROPELLANT is its own gate
+            'needs_amat': bool((f['fuel'] or {}).get('antimatter')),
+            'needs_exo': bool((f['fuel'] or {}).get('exotics')),
         })
 
     def show(r, role):
         fom = r['fom_combat'] if role == 'combat' else r['fom_transit']
         st = r['status'] if r['status'] != 'LOCKED' else f"debt {r['debt']}"
+        blk = ('  ⛔ BLOCKED by ' + ','.join(r['blocked'])) if r.get('blocked') else ''
+        if r.get('needs_amat'): blk += '  ⚠ NEEDS ANTIMATTER fuel'
+        if r.get('needs_exo'): blk += '  ⚠ needs exotics fuel'
         print(f"  {r['name']:<26.26} {r['cls']:<16.16} EV{r['ev']:>6.0f} "
               f"combat{r['combat_MN']:>7.0f}MN cruise{r['cruise_MN']:>6.1f}MN cap{r['cap']:>3} "
-              f"{r['cool']:<5} fom{fom:>9.0f}  [{st}, ~{r['eff_rp']:.0f} eff RP]")
+              f"{r['cool']:<5} fom{fom:>9.0f}  [{st}, ~{r['eff_rp']:.0f} eff RP]{blk}")
 
     print(f"# Drive upgrade finder — {args.faction}")
     print(f"Combat baseline (Lodestar) = {base_combat/1e6:.0f} MN combat thrust.\n")
+
+    if banned:
+        reachable = [r for r in rows if r['combat_MN'] > base_combat/1e6
+                     and r['status'] != 'RESEARCHED' and not r['blocked'] and 'Alien' not in r['pj']]
+        print(f"## 0) CEILING WITHOUT {', '.join(sorted(banned))}")
+        for r in sorted(reachable, key=lambda x: -x['combat_MN']):
+            show(r, 'combat')
+        usable = [r for r in reachable if not r['needs_amat']]
+        if reachable and not usable:
+            print("  ⚠ ALL of the above need ANTIMATTER fuel — unusable without antimatter production,")
+            print("    so in practice the baseline is still your ceiling (LESSONS-research R28).")
+        if not reachable:
+            print("  NOTHING beats the baseline without those techs — the whole tier is walled behind them.")
+            print("  Your current drive IS the ceiling until you pay for them (LESSONS-research R28).")
+        print()
 
     print("## 1) COMBAT candidates — higher combat thrust than Lodestar, nearest first")
     print("   (raw combat thrust is what sets combat g; fom = combat×√EV)")

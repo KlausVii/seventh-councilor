@@ -419,3 +419,31 @@ Rules:
    global" pull project RP toward the dead ladder (sunk-cost direction check).
 4. When the player says "didn't you tell me X before?" — reconstruct WHICH state change flipped
    the verdict and say so explicitly; if none did, the earlier advice was simply wrong (own it).
+
+## R28 (2033-10-28; authored 2026-07-21) — Before planning an upgrade path, find the GATE — and remember tech-reachable ≠ usable
+
+Two failure modes when a player asks "what's the next X I can get?".
+
+**(1) A whole tier is often walled behind ONE or TWO expensive globals.** Quoting the cheapest
+item that beats the baseline hides the wall. 2033-10-28: every fusion torch that beats Lodestar
+(1,320 MN) — Borane 1,814 / Protium Nova 2,376 / Protium Converter 3,514 — needs BOTH
+`TerawattFusionReactors` (50,000 in-game RP) and `AneutronicFusion` (37,500). Those two globals are
+87,500 of Borane's 282,500 total; **naming the gate reframes the whole decision** from "which drive"
+to "am I buying this tier at all?" Run
+`drive_upgrade_finder.py --exclude <techA>,<techB>` — it prints a **CEILING WITHOUT** section and
+marks every blocked candidate ⛔, so the answer to "what's my ceiling without paying for X?" is one
+command. When the answer is "nothing", say so plainly: *the drive you already fly IS the ceiling.*
+
+**(2) Tech-reachable ≠ usable — exotic PROPELLANT is a second, independent gate.** The two drives
+that dodged the fusion wall above (Pion Torch, Advanced Antimatter Plasma Core) both burn
+**antimatter per tank**, which the player did not produce, so they were unusable at any RP price —
+and both cost MORE than the blocked option anyway. Always read `perTankPropellantMaterials` next to
+the prereq closure; the finder now flags `⚠ NEEDS ANTIMATTER fuel` / `⚠ needs exotics fuel`.
+Related: Helion drives cost 1 fissile/tank unless the He3 Mine is built (LESSONS-ships S20).
+
+**Corollary — check whether the upgrade is even USED.** Score the gate against the bio-g cap first:
+if the current drive already exceeds the mass-at-cap of anything you build (Lodestar x6 carries
+33,639 t at 4.0 g vs a ~26 kt largest design), extra combat thrust buys **nothing** and the real
+purchase is EV/reach. A 282,500-RP "combat upgrade" that changes no combat outcome is the most
+expensive kind of mistake. Note the budget SHRINKS as the g-cap rises (29,901 t at 4.5 g), so
+raising the cap is what makes a stronger drive worth buying.
