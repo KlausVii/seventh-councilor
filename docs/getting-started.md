@@ -22,22 +22,53 @@ command-line version. Everything below works the same in either one.
 Claude Code needs a paid Anthropic account. If you'd rather not pay for one, skip to Path B —
 the tools still work, you just drive them yourself.
 
-### 2. Ask it to set everything up
+### 2. Decide what it's allowed to touch — do this before anything else
 
-Open Claude Code and paste this, exactly as written:
+An AI coding agent isn't a normal program. It can read and write files and run commands, it
+doesn't do exactly the same thing every time, and it works by sending what it reads to a
+company's servers. That's true of every agent, not just this project — but if this is your
+first one, decide the boundaries now rather than after.
 
-> Clone https://github.com/mahaniok/seventh-councilor into a new folder, open that folder,
-> and set it up from my newest Terra Invicta save. If I'm missing anything I need to install
-> first, like Python, tell me how to install it before you continue.
+Three things, in order of how much they actually protect you:
 
-That's the whole installation. It will download the repo, check what your computer is
-missing, find your Terra Invicta saves on its own, detect your faction and campaign settings,
-and copy the game's data files out of your own install.
+1. **Give it its own folder.** When it asks where to put the repo, choose a fresh empty folder
+   — `Documents/seventh-councilor` is fine. Don't start the agent in your home directory, your
+   Desktop, or anywhere with unrelated personal files. What it can see is mostly decided by
+   where you start it.
+2. **Leave the permission prompts on.** Agents offer a mode that auto-approves every action
+   without asking — variously "accept edits", "auto-approve", "YOLO mode". Leave it **off** and
+   read what it proposes. This is the control that catches a misunderstood instruction before
+   it runs, and it costs you a few clicks.
+3. **If you want real isolation, use a VM or container.** A `Dockerfile` is included for the
+   analyzers — see [SECURITY.md](../SECURITY.md). This is the strongest option and also the
+   most work; the folder choice and the permission prompts are enough for most people.
+
+One thing that gets suggested a lot and isn't a real safeguard: *asking the agent to restrict
+itself.* Telling it "don't touch anything outside this folder" is a request, not a boundary —
+the same non-determinism that makes it useful means it can't be trusted to police itself. Use
+the folder you start it in, the permission prompts, and the VM. Those are enforced; a polite
+instruction isn't.
+
+Full breakdown of what the scripts do versus what the agent does, with commands to verify it
+yourself: [SECURITY.md](../SECURITY.md).
+
+### 3. Ask it to set everything up
+
+In the folder you chose, paste this, exactly as written:
+
+> Clone https://github.com/mahaniok/seventh-councilor into this folder and set it up from my
+> newest Terra Invicta save. Work only inside this folder. If I need to install something
+> first, like Python, tell me what and why, and wait for me to say yes before installing
+> anything.
+
+That's the whole installation. It will download the repo, tell you what your computer is
+missing, find your Terra Invicta saves, detect your faction and campaign settings, and copy
+the game's data files out of your own install.
 
 If it can't find your saves or your game folder, it will ask — the usual locations are listed
 at the bottom of [setup.md](setup.md) if you need to paste one in.
 
-### 3. Ask it something
+### 4. Ask it something
 
 Try these, in plain English, exactly like you'd ask a person:
 
@@ -49,7 +80,7 @@ Try these, in plain English, exactly like you'd ask a person:
 
 Then browse [examples.md](examples.md) for the full catalog of what it can answer.
 
-### 4. Next time you play
+### 5. Next time you play
 
 You don't repeat any of this. Open the folder in Claude Code again and ask your question — it
 picks up your newest save automatically. Re-run the setup only after a Terra Invicta patch, or
