@@ -180,6 +180,29 @@ def load_game_templates():
         m.get('dataName'): (m.get('incomeResearch_month', 0) or 0) for m in modules
     }
 
+    # Trait Science mods / direct research incomes — used by extract_snapshot_income_breakdown
+    # for the EXACT councilor research formula (GetMonthlyIncomeFromCouncilors), matching
+    # research_income.py's _load_templates_extra(). Replaces an old observation-fit heuristic
+    # that was ~2x off in early-game saves where few councilors have income-generating orgs yet.
+    traits_tmpl = _safe_load_json(os.path.join(tdir, 'TITraitTemplate.json')) or []
+    trait_sci, trait_res = {}, {}
+    for t in traits_tmpl:
+        dn = t.get('dataName')
+        if not dn:
+            continue
+        sci = 0.0
+        for m in (t.get('statMods') or []):
+            if m.get('stat') == 'Science' and m.get('operation', 'Additive') == 'Additive' \
+                    and not m.get('condition'):
+                try:
+                    sci += float(m.get('strValue', 0) or 0)
+                except ValueError:
+                    pass
+        if sci:
+            trait_sci[dn] = sci
+        if t.get('incomeResearch'):
+            trait_res[dn] = t['incomeResearch']
+
     return {
         'project_friendly': project_friendly,
         'project_templates': project_templates,
@@ -188,6 +211,8 @@ def load_game_templates():
         'module_friendly': module_friendly,
         'module_research_income': module_research_income,
         'tech_templates': tech_templates,
+        'trait_science_mods': trait_sci,
+        'trait_research_incomes': trait_res,
     }
 
 
@@ -2795,9 +2820,10 @@ def extract_snapshot_income_breakdown(gs, faction_id, factions, templates):
 
     Sources (per `UI.GeneralControls.*IncomeTip` localization):
       1. HQ            — `baseIncomes_year.Research / 365.25` (always 1/day)
-      2. Councilors    — heuristic from `councilors[].attributes.Science`
-                         (≈ 4/councilor + Science × ~0.5; coefficient is
-                         observation-fit, not from binary)
+      2. Councilors    — exact: GetMonthlyIncomeFromCouncilors, Σ per non-detained
+                         councilor of (org.incomeResearch_month + trait.incomeResearch)
+                         × (1 + effScience/100), effScience = attributes.Science +
+                         Σ org.science + Σ unconditional trait Science mods.
       3. Nations       — Σ over my CPs in nation N of
                          `N.historyResearch[0] × CP_share`. **CRITICAL:**
                          use `[0]` (newest), NOT `[-1]` (oldest); arrays are
@@ -2814,8 +2840,8 @@ def extract_snapshot_income_breakdown(gs, faction_id, factions, templates):
                          when the relevant research-distribution tech is done).
 
     Returns a dict with per-source daily/monthly/annual values + a breakdown
-    of advisers and category bonuses. Some components (councilors, MC cap)
-    use heuristics; flag is_estimated=True when so.
+    of advisers and category bonuses. Some components (Advise direct boost,
+    MC cap) use heuristics; flag is_estimated=True when so.
     """
     faction = factions.get(faction_id) if isinstance(factions, dict) else factions[faction_id]
     if not faction:
@@ -2826,16 +2852,35 @@ def extract_snapshot_income_breakdown(gs, faction_id, factions, templates):
     hq_per_year = (faction.get('baseIncomes_year') or {}).get('Research', 0) or 0
     hq_per_day = hq_per_year / 365.25
 
-    # ---- 2. Councilors (heuristic; documented as approximate)
+    # ---- 2. Councilors (exact: GetMonthlyIncomeFromCouncilors, matches research_income.py)
     councilors_db = {c['Value']['ID']['value']: c['Value']
                      for c in gs.get('PavonisInteractive.TerraInvicta.TICouncilorState', [])}
+    orgs_db = dict(kv_items(gs, 'PavonisInteractive.TerraInvicta.TIOrgState'))
+    trait_sci = (templates or {}).get('trait_science_mods', {})
+    trait_res = (templates or {}).get('trait_research_incomes', {})
     player_cids = [ref.get('value') for ref in (faction.get('councilors') or [])]
     council_sci_total = sum((councilors_db.get(cid, {}).get('attributes', {}) or {}).get('Science', 0)
                             for cid in player_cids if cid)
-    # Empirical fit from the 2032-04-28 tooltip: 6 councilors with Sci=6 → 26.5/day.
-    # Best-fit single-term formula: ≈ 4.4/councilor base, Sci contribution is
-    # collapsed inside that (Science 0..few). Be conservative: report base + Sci.
-    council_per_day_estimate = 4.0 * len(player_cids) + council_sci_total * 0.5
+
+    def _councilor_eff_science(cid):
+        c = councilors_db.get(cid, {}) or {}
+        sci = (c.get('attributes', {}) or {}).get('Science', 0) or 0
+        sci += sum((orgs_db.get(deref(o), {}) or {}).get('science', 0) or 0
+                   for o in (c.get('orgs') or []))
+        sci += sum(trait_sci.get(tn, 0) for tn in (c.get('traitTemplateNames') or []))
+        return sci
+
+    council_per_month = 0.0
+    for cid in player_cids:
+        c = councilors_db.get(cid, {}) or {}
+        if not cid or c.get('detained'):
+            continue
+        base = sum((orgs_db.get(deref(o), {}) or {}).get('incomeResearch_month', 0) or 0
+                   for o in (c.get('orgs') or []))
+        base += sum(trait_res.get(tn, 0) for tn in (c.get('traitTemplateNames') or []))
+        if base > 0:
+            council_per_month += base * (1.0 + _councilor_eff_science(cid) / 100.0)
+    council_per_day_estimate = council_per_month * 12 / 365.2421875
 
     # ---- 3. Nations via CP share + Advise direct boost
     nations_db = {n['Value']['ID']['value']: n['Value']
@@ -3017,7 +3062,7 @@ def extract_snapshot_income_breakdown(gs, faction_id, factions, templates):
         'advise_breakdown': advise_breakdown,
         'advise_total_attrs': advise_total_attrs,
         # ---- accuracy flags ----
-        'is_estimated': True,  # councilors, advise, MC are heuristic; HQ + habs + nation-CP-share are exact
+        'is_estimated': True,  # advise, MC are heuristic; HQ + councilors + habs + nation-CP-share are exact
         'cached_yearly_revenue_research': (faction.get('cachedYearlyRevenue') or {}).get('Research', 0),
         'cached_is_stale_warning': 'cachedYearlyRevenue.Research is often ~2× off — DO NOT use it. The live tooltip value is the ground truth; this breakdown reconstructs it from primary save data.',
     }
@@ -4648,16 +4693,16 @@ def format_markdown(snapshot, brief=False):
                  "to the daily decimal on the 2032-04-28 save (1+26.5+180.3+31.2+5.7 "
                  "= 244.7 × 1.30 = 318.1/day → 9.7K/mo). The breakdown "
                  "is reconstructed from primary save data; flagged components are "
-                 "heuristics (councilors, Advise direct boost, MC cap).")
+                 "heuristics (Advise direct boost, MC cap).")
         L.append("")
         L.append("| Source | Daily | Monthly | Note |")
         L.append("|---|---:|---:|---|")
         L.append(f"| 1. Faction HQ | {ri['hq_per_day']:.2f} | "
                  f"{ri['hq_per_day']*30.44:.0f} | exact, from `baseIncomes_year.Research/365.25` |")
-        L.append(f"| 2. Councilors (est.) | {ri['councilors_per_day_estimate']:.2f} | "
-                 f"{ri['councilors_per_day_estimate']*30.44:.0f} | heuristic: "
-                 f"{ri['councilors_count']} councilors × ~4/each + Sci total "
-                 f"{ri['councilor_science_total']} × ~0.5 |")
+        L.append(f"| 2. Councilors | {ri['councilors_per_day_estimate']:.2f} | "
+                 f"{ri['councilors_per_day_estimate']*30.44:.0f} | exact: "
+                 f"Σ over {ri['councilors_count']} councilors of "
+                 f"(org+trait incomeResearch) × (1 + effScience/100) |")
         L.append(f"| 3a. Nations (CP-share) | {ri['nation_cp_share_per_day']:.2f} | "
                  f"{ri['nation_cp_share_per_day']*30.44:.0f} | exact: Σ over my CPs of "
                  f"(N.historyResearch[0] × ownership_share) |")
