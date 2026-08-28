@@ -20,10 +20,11 @@ Usage:
     python3 alien_progress_timeline.py --newest       # just the newest save
 
 Player faction comes from config.json; override with --faction <templateName>.
+Pass --json for machine-readable output (one JSON document, same columns).
 
 ⚠️ Ground truth — includes undetected alien assets. Historical record only.
 """
-import sys, os, re, glob
+import sys, os, re, glob, json
 
 if '--help' in sys.argv or '-h' in sys.argv:
     print(__doc__ or 'See the module docstring for usage.')
@@ -118,6 +119,9 @@ def main():
         except IndexError:
             sys.exit("--faction needs a value (a faction templateName)")
         del args[i:i + 2]
+    json_out = '--json' in args
+    if json_out:
+        args.remove('--json')
     faction = require_faction(faction_cli)
     idx = build_index()
     if args == ['--newest']:
@@ -131,22 +135,37 @@ def main():
     else:
         targets = args if args else table_a_dates()
 
-    print(f"{'target':10s} {'save date':10s} {'Δd':>3s}  {'A.Ships':>7s} {'A.kt':>7s} "
-          f"{'A.Base':>6s}  {'P.Ships':>7s} {'P.kt':>7s}")
-    print("-" * 72)
+    if not json_out:
+        print(f"{'target':10s} {'save date':10s} {'Δd':>3s}  {'A.Ships':>7s} {'A.kt':>7s} "
+              f"{'A.Base':>6s}  {'P.Ships':>7s} {'P.kt':>7s}")
+        print("-" * 72)
     rows = []
+    out_rows = []
     for t in targets:
         f, sd, dd = find_save(idx, t)
         if not f:
-            print(f"{t:10s} {'—':10s}  no save within tolerance")
+            if not json_out:
+                print(f"{t:10s} {'—':10s}  no save within tolerance")
             rows.append((t, None))
+            out_rows.append({'target': t, 'save_date': None,
+                             'error': 'no save within tolerance'})
             continue
         data = load_save(f)
         gs = data['gamestates']
-        ap = extract_alien_progress(gs, get_factions(gs), faction_template=faction)
-        print(f"{t:10s} {sd:10s} {dd:>3d}  {ap['alien_ships']:>7d} {ap['alien_kt']:>7.1f} "
-              f"{ap['alien_bases']:>6d}  {ap['player_ships']:>7d} {ap['player_kt']:>7.1f}")
+        # include_hidden: this is the backward-looking historical record (Table A),
+        # the documented legitimate use of full ground truth — not live intel.
+        ap = extract_alien_progress(gs, get_factions(gs), faction_template=faction,
+                                    include_hidden=True)
+        if not json_out:
+            print(f"{t:10s} {sd:10s} {dd:>3d}  {ap['alien_ships']:>7d} {ap['alien_kt']:>7.1f} "
+                  f"{ap['alien_bases']:>6d}  {ap['player_ships']:>7d} {ap['player_kt']:>7.1f}")
         rows.append((t, ap))
+        out_rows.append({'target': t, 'save_date': sd, 'delta_days': dd,
+                         'alien_ships': ap['alien_ships'], 'alien_kt': ap['alien_kt'],
+                         'alien_bases': ap['alien_bases'],
+                         'player_ships': ap['player_ships'], 'player_kt': ap['player_kt']})
+    if json_out:
+        print(json.dumps({'faction': faction, 'rows': out_rows}, indent=2, default=str))
     return rows
 
 

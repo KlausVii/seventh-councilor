@@ -370,7 +370,7 @@ DRIVE_TO_TIER = {d: tier for tier, drives in DRIVE_TIERS for d in drives}
 
 # THE loader lives in ti_config (gzip magic + BOM handling + per-process
 # memoization); re-exported here because most analyzers import it from us.
-from ti_config import load_save  # noqa: F401
+from ti_config import load_save, parse_intel_map  # noqa: F401
 
 
 def kv_items(gs, state_key):
@@ -2311,7 +2311,8 @@ def extract_alien_pressure(gs, faction_id=None):
     }
 
 
-def extract_alien_progress(gs, factions=None, faction_template=None):
+def extract_alien_progress(gs, factions=None, faction_template=None, *,
+                           include_hidden=False):
     """Factual alien (Hydra) space-military footprint — SAVE GROUND TRUTH.
 
     Returns {alien_ships, alien_fleets, alien_kt, alien_bases,
@@ -2324,7 +2325,15 @@ def extract_alien_progress(gs, factions=None, faction_template=None):
 
     ⚠️ HIDDEN-INFO: this is full ground truth and includes alien ships/bases the
     player has NOT detected in-game. Correct for a backward-looking historical
-    record (Table A); do NOT quote as live intel while advising active play."""
+    record (Table A); do NOT quote as live intel while advising active play.
+    Callers must opt in with include_hidden=True to make that choice explicit;
+    for live-play advice use extract_alien_posture (intel-filtered) instead."""
+    if not include_hidden:
+        raise ValueError(
+            "extract_alien_progress returns FULL ground truth incl. undetected "
+            "alien assets (spoilers). Pass include_hidden=True for a deliberate "
+            "historical/aggregate use, or call extract_alien_posture for the "
+            "intel-filtered order of battle.")
     if factions is None:
         factions = get_factions(gs)
     if faction_template is None:
@@ -4428,10 +4437,7 @@ def extract_alien_posture(gs, faction_id, factions):
     alien_fid = next((fid for fid, fv in factions.items()
                       if fv.get('templateName') == 'AlienCouncil'), None)
     pf = factions.get(faction_id, {})
-    intel = {}
-    for e in (pf.get('intel') or []):
-        k = e.get('Key') or {}
-        intel[((k.get('$type') or '').split('.')[-1], k.get('value'))] = e.get('Value', 0)
+    intel = parse_intel_map(pf)
 
     space_bodies = {bid: bv.get('displayName') or bv.get('templateName') or '?'
                     for bid, bv in kv_items(gs, 'PavonisInteractive.TerraInvicta.TISpaceBodyState')}

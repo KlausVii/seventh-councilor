@@ -160,6 +160,18 @@ def load_save(path) -> dict:
     return obj
 
 
+def parse_intel_map(faction_value: dict) -> dict[tuple[str, int], float]:
+    """A faction's `intel` list as {(stateType, id): level}, e.g.
+    ('TIHabState', 123) -> 0.5. THE spoiler gate for rival/alien internals:
+    quote details only at the intel level the in-game UI shows them
+    (calibration notes: capture_target_planner.py header, CLAUDE.md 🕶)."""
+    intel: dict[tuple[str, int], float] = {}
+    for e in (faction_value.get("intel") or []):
+        k = e.get("Key") or {}
+        intel[((k.get("$type") or "").split(".")[-1], k.get("value"))] = e.get("Value", 0)
+    return intel
+
+
 # ---------------------------------------------------------------------------
 # Game-data discovery (templates / localization). Preference order:
 #   1. the local mirror created by sync_game_data.py (scripts/templates — gitignored)

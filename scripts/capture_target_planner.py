@@ -46,7 +46,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from extract_snapshot import (load_save, kv_items, deref, get_factions,
                               faction_id_by_template, fac_id_from_field,
-                              get_game_date, extract_mine_inventory)
+                              get_game_date, extract_mine_inventory,
+                              parse_intel_map)
 from mine_completion_timeline import derive_K_income
 from transfer_eta import eta_seconds
 from ti_config import CONFIG, newest_save, find_templates_dir
@@ -142,10 +143,7 @@ def main():
 
     # intel map: (stateType, id) -> level
     pf = factions.get(fid, {})
-    intel = {}
-    for e in (pf.get('intel') or []):
-        k = e.get('Key') or {}
-        intel[((k.get('$type') or '').split('.')[-1], k.get('value'))] = e.get('Value', 0)
+    intel = parse_intel_map(pf)
 
     # Retaliation picture: mutual hate + the owner's navy. Taking a mine is an act
     # of war against a faction that may or may not be able to answer — a defenceless
