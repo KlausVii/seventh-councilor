@@ -26,6 +26,9 @@ Pass --json for machine-readable output (one JSON document, same columns).
 """
 import sys, os, re, glob, json
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 if '--help' in sys.argv or '-h' in sys.argv:
     print(__doc__ or 'See the module docstring for usage.')
     raise SystemExit(0)

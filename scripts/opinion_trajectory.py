@@ -21,6 +21,9 @@ Reference-campaign findings this script was built on (see LESSONS-politics C15):
 """
 import gzip, json, sys, glob, os, re
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 if '--help' in sys.argv or '-h' in sys.argv or len(sys.argv) < 3:
     print(__doc__ or 'Usage: see module docstring.')
     raise SystemExit(0 if '--help' in sys.argv or '-h' in sys.argv else 1)
