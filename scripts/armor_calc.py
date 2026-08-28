@@ -39,6 +39,9 @@ Built 2026-07-15 (bombardment/armor mechanics session).
 """
 import argparse, json, os, re, sys
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE = os.path.join(HERE, 'templates', 'TIShipArmorTemplate.json')
 

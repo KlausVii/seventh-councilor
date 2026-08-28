@@ -89,7 +89,8 @@ class Cli(unittest.TestCase):
                 continue
             with self.subTest(script=p.name):
                 r = subprocess.run([sys.executable, str(p), "--help"],
-                                   capture_output=True, text=True, timeout=60)
+                                   capture_output=True, text=True, timeout=60,
+                                   encoding="utf-8", errors="replace")
                 if p.name in NEEDS_GAME_DATA and r.returncode != 0:
                     self.assertIn("not found", r.stdout + r.stderr,
                                   f"{p.name}: unexpected --help failure:\n{r.stderr}")
@@ -99,11 +100,13 @@ class Cli(unittest.TestCase):
 
     def test_tic_list_and_editor_refusal(self):
         r = subprocess.run([sys.executable, str(SCRIPTS / "tic.py"), "list"],
-                           capture_output=True, text=True, timeout=60)
+                           capture_output=True, text=True, timeout=60,
+                           encoding="utf-8", errors="replace")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("snapshot", r.stdout)
         r = subprocess.run([sys.executable, str(SCRIPTS / "tic.py"), "ti_war_editor"],
-                           capture_output=True, text=True, timeout=60)
+                           capture_output=True, text=True, timeout=60,
+                           encoding="utf-8", errors="replace")
         self.assertNotEqual(r.returncode, 0, "tic must refuse to dispatch the save editor")
         self.assertIn("refusing", r.stderr + r.stdout)
 
