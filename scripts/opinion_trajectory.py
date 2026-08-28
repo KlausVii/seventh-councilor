@@ -4,6 +4,7 @@
 Usage:
     python3 opinion_trajectory.py 2026_USA save1.json save2.json ...
     python3 opinion_trajectory.py 2026_USA --glob "_2032-12-*"   # all Dec-2032 saves
+    python3 opinion_trajectory.py 2026_USA save1.json ... --json # machine-readable output
 
 For each save (sorted by save counter), prints the nation's publicOpinion by
 ideology PLUS every councilor whose priorMissionTemplateName == 'Propaganda'
@@ -43,8 +44,10 @@ def counter(path):
         return 0
 
 
-def analyze(nation_template, paths):
-    print(f"{'date':12} " + " ".join(f"{i[:6]:>6}" for i in IDEOLOGIES) + "  | propaganda (prior mission)")
+def analyze(nation_template, paths, json_out=False):
+    if not json_out:
+        print(f"{'date':12} " + " ".join(f"{i[:6]:>6}" for i in IDEOLOGIES) + "  | propaganda (prior mission)")
+    rows = []
     for p in sorted(paths, key=counter):
         s = load_save(p)
         gs = s["gamestates"]
@@ -53,7 +56,12 @@ def analyze(nation_template, paths):
         nat = next((n["Value"] for n in gs["PavonisInteractive.TerraInvicta.TINationState"]
                     if n["Value"].get("templateName") == nation_template), None)
         if nat is None:
-            print(os.path.basename(p), f"— nation {nation_template} not found"); continue
+            if json_out:
+                rows.append({"save": os.path.basename(p),
+                             "error": f"nation {nation_template} not found"})
+            else:
+                print(os.path.basename(p), f"— nation {nation_template} not found")
+            continue
         o = nat["publicOpinion"]
         props = []
         for c in gs["PavonisInteractive.TerraInvicta.TICouncilorState"]:
@@ -62,16 +70,26 @@ def analyze(nation_template, paths):
                 tgt = (v.get("priorMissionTarget") or {}).get("value")
                 props.append(f"{fs.get((v.get('faction') or {}).get('value'))} {v.get('displayName')}→{nid.get(tgt, tgt)}")
         date = os.path.basename(p).split("_")[-1].replace(".json", "")
-        print(f"{date:12} " + " ".join(f"{o.get(i, 0)*100:6.1f}" for i in IDEOLOGIES) + "  | " + ", ".join(props))
+        if json_out:
+            rows.append({"date": date, "opinion": {i: o.get(i, 0) for i in IDEOLOGIES},
+                         "propaganda": props})
+        else:
+            print(f"{date:12} " + " ".join(f"{o.get(i, 0)*100:6.1f}" for i in IDEOLOGIES) + "  | " + ", ".join(props))
+    if json_out:
+        print(json.dumps({"nation": nation_template, "rows": rows}, indent=2, default=str))
 
 
 if __name__ == "__main__":
-    nation = sys.argv[1]
-    if sys.argv[2] == "--glob":
+    argv = sys.argv[1:]
+    json_out = "--json" in argv
+    if json_out:
+        argv.remove("--json")
+    nation = argv[0]
+    if argv[1] == "--glob":
         if not SAVES:
             raise SystemExit("No save directory found — set save_dir in config.json "
                              "or pass explicit save paths instead of --glob.")
-        paths = glob.glob(SAVES + "*" + sys.argv[3] + "*")
+        paths = glob.glob(SAVES + "*" + argv[2] + "*")
     else:
-        paths = sys.argv[2:]
-    analyze(nation, paths)
+        paths = argv[1:]
+    analyze(nation, paths, json_out)

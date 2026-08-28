@@ -43,9 +43,11 @@ def main():
     ap.add_argument('save')
     ap.add_argument('--target', required=True)
     ap.add_argument('--faction', default=None)
+    ap.add_argument('--json', action='store_true')
     args = ap.parse_args()
     from ti_config import require_faction
     args.faction = require_faction(args.faction)
+    say = (lambda *a, **kw: None) if args.json else print
 
     gs = load_save(args.save)['gamestates']
     hab_tpl = {t['dataName']: t for t in json.load(open(os.path.join(TPL_DIR, 'TIHabModuleTemplate.json')))}
@@ -84,12 +86,18 @@ def main():
         if h.get('displayName') == args.target:
             tgt_id, tgt = hid, h
     if not tgt:
+        if args.json:
+            raise SystemExit(f'target "{args.target}" not found')
         print(f'target "{args.target}" not found'); return
     body = hab_body(tgt)
-    print(f"# Assault recon: {args.target} — {body}, tier {tgt.get('tier')}, "
-          f"owner {fac_name.get(key(tgt.get('faction')))}\n")
+    out = {'target': {'name': args.target, 'body': body, 'tier': tgt.get('tier'),
+                      'owner': fac_name.get(key(tgt.get('faction')))},
+           'target_modules': [], 'specimen_milestones': [], 'your_fleets': [],
+           'your_habs_at_body': [], 'alien_fleets': []}
+    say(f"# Assault recon: {args.target} — {body}, tier {tgt.get('tier')}, "
+        f"owner {fac_name.get(key(tgt.get('faction')))}\n")
 
-    print('## Target modules')
+    say('## Target modules')
     scv = 0.0
     ground_intact = (tgt.get('tier') or 0)
     ground_after = (tgt.get('tier') or 0)
@@ -116,15 +124,22 @@ def main():
         for r in rules & set(SPECIMEN_RULES):
             specimens[SPECIMEN_RULES[r]].append(tn)
         flag = ' ⚔SCV' if mscv > 0 else (' ⚡pwr' if ('Reactor' in tn or 'Pile' in tn) else '')
-        print(f"  {tn:30} SCV={mscv:>9,.0f}  marineDef={marine_val:>3}{flag}")
-    print(f"\nStation SCV (active): {scv:,.0f}")
-    print(f"Ground defense INTACT: ~{ground_intact:.0f} (+ command-adviser/effect multipliers)")
-    print(f"Ground defense after destroying non-core defense/barracks modules: ~{ground_after:.0f}")
-    print(f"P(assault success) = 1 − 0.5 × 0.775^(attacker − defender): "
-          f"+9 over → 95%, +18 over → 99.5%")
-    print('\nSpecimen milestones carried by this hab:')
+        out['target_modules'].append({'module': tn, 'scv': mscv,
+                                      'marine_defense': marine_val})
+        say(f"  {tn:30} SCV={mscv:>9,.0f}  marineDef={marine_val:>3}{flag}")
+    out['station_scv_active'] = scv
+    out['ground_defense_intact'] = ground_intact
+    out['ground_defense_after_bombardment'] = ground_after
+    say(f"\nStation SCV (active): {scv:,.0f}")
+    say(f"Ground defense INTACT: ~{ground_intact:.0f} (+ command-adviser/effect multipliers)")
+    say(f"Ground defense after destroying non-core defense/barracks modules: ~{ground_after:.0f}")
+    say(f"P(assault success) = 1 − 0.5 × 0.775^(attacker − defender): "
+        f"+9 over → 95%, +18 over → 99.5%")
+    say('\nSpecimen milestones carried by this hab:')
     for ms, srcs in specimens.items():
-        print(f"  {ms}: {len(srcs)} module(s) — {', '.join(sorted(set(srcs)))}")
+        out['specimen_milestones'].append({'milestone': ms, 'count': len(srcs),
+                                           'modules': sorted(set(srcs))})
+        say(f"  {ms}: {len(srcs)} module(s) — {', '.join(sorted(set(srcs)))}")
 
     # player fleets + marine values
     ships = {key(s['Key']): s['Value'] for s in gs['PavonisInteractive.TerraInvicta.TISpaceShipState']}
@@ -137,7 +152,7 @@ def main():
             v += MARINE_SHIP_MODULES.get(e.get('moduleName'), 0)
         return v, d.get('_displayName', s.get('templateName'))
 
-    print('\n## Your fleets (marine value = Σ MarineAssaultUnit 4/6/8)')
+    say('\n## Your fleets (marine value = Σ MarineAssaultUnit 4/6/8)')
     for f in gs['PavonisInteractive.TerraInvicta.TISpaceFleetState']:
         v = f['Value']
         if key(v.get('faction')) != my_fid:
@@ -153,9 +168,11 @@ def main():
             classes[cls] += 1
         loc = fleet_name(v, my_fid)
         comp = ', '.join(f'{c}×{n}' for c, n in sorted(classes.items(), key=lambda x: -x[1])[:6])
-        print(f"  {loc:24} ships={len(sl):3} marineValue={mar:3}  [{comp}]")
+        out['your_fleets'].append({'fleet': loc, 'ships': len(sl), 'marine_value': mar,
+                                   'composition': dict(classes)})
+        say(f"  {loc:24} ships={len(sl):3} marineValue={mar:3}  [{comp}]")
 
-    print(f'\n## Your habs at {body}')
+    say(f'\n## Your habs at {body}')
     for hid, h in habs.items():
         if key(h.get('faction')) == my_fid and hab_body(h) == body:
             yard = []
@@ -163,9 +180,11 @@ def main():
                 if sec2hab.get(key(m.get('sector'))) == hid and m.get('exists') and not m.get('destroyed'):
                     if any(x in (m.get('templateName') or '') for x in ('Shipyard', 'Spacedock', 'Spaceworks')):
                         yard.append(m.get('templateName') + ('' if m.get('constructionCompleted') else ' (building)'))
-            print(f"  {h.get('displayName'):30} T{h.get('tier')}  shipyards: {', '.join(yard) or '—'}")
+            out['your_habs_at_body'].append({'hab': h.get('displayName'),
+                                             'tier': h.get('tier'), 'shipyards': yard})
+            say(f"  {h.get('displayName'):30} T{h.get('tier')}  shipyards: {', '.join(yard) or '—'}")
 
-    print('\n## Alien fleets (response picture)')
+    say('\n## Alien fleets (response picture)')
     rows = []
     for f in gs['PavonisInteractive.TerraInvicta.TISpaceFleetState']:
         v = f['Value']
@@ -175,7 +194,11 @@ def main():
         if n:
             rows.append((v.get('displayName'), n))
     for name, n in sorted(rows, key=lambda x: -x[1]):
-        print(f"  {name}: {n} ships")
+        out['alien_fleets'].append({'fleet': name, 'ships': n})
+        say(f"  {name}: {n} ships")
+
+    if args.json:
+        print(json.dumps(out, indent=2, default=str))
 
 if __name__ == '__main__':
     main()

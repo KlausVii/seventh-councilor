@@ -43,6 +43,7 @@ Reuses parsing/extractors from extract_snapshot.py (same directory, import-safe)
 
 import argparse
 import gc
+import json
 import os
 import re
 import sys
@@ -270,24 +271,27 @@ def _verdict(rates, last_n=3):
     return tag, early, late
 
 
+TEMPO_METRICS = [
+    ("techs_done", "Tech completion", "techs/mo"),
+    ("projects_done", "Project completion", "projects/mo"),
+    ("research_yr", "Research income", "Δ(RP/yr)/mo"),
+    ("mc_cap", "MC cap", "MC/mo"),
+    ("mc_used", "MC used", "MC/mo"),
+    ("cps", "Control points", "CPs/mo"),
+    ("habs", "Habs", "habs/mo"),
+    ("fleet_kt", "Player fleet tonnage", "kt/mo"),
+    ("alien_fleet_kt", "Alien fleet tonnage", "kt/mo"),
+    ("hate", "Alien hate (displayed)", "hate/mo"),
+]
+
+
 def render_tempo(points):
     """Tempo analysis: per-month deltas + verdicts for the headline metrics."""
     L = ["## Tempo analysis", ""]
     if len(points) < 2:
         return "\n".join(L + ["Need ≥2 snapshots for tempo."])
 
-    metrics = [
-        ("techs_done", "Tech completion", "techs/mo"),
-        ("projects_done", "Project completion", "projects/mo"),
-        ("research_yr", "Research income", "Δ(RP/yr)/mo"),
-        ("mc_cap", "MC cap", "MC/mo"),
-        ("mc_used", "MC used", "MC/mo"),
-        ("cps", "Control points", "CPs/mo"),
-        ("habs", "Habs", "habs/mo"),
-        ("fleet_kt", "Player fleet tonnage", "kt/mo"),
-        ("alien_fleet_kt", "Alien fleet tonnage", "kt/mo"),
-        ("hate", "Alien hate (displayed)", "hate/mo"),
-    ]
+    metrics = TEMPO_METRICS
     L.append("| Metric | Whole-run avg | Early avg | Last-3-interval avg | Verdict |")
     L.append("|---|---:|---:|---:|---|")
     for key, label, unit in metrics:
@@ -368,6 +372,7 @@ def main():
                     help="with --auto: restrict to these YYYY-MM months")
     ap.add_argument("--save-dir", default=DEFAULT_SAVE_DIR)
     ap.add_argument("-o", "--out", default=None, help="write markdown here (default stdout)")
+    ap.add_argument("--json", action="store_true", help="machine-readable output")
     args = ap.parse_args()
     args.faction = require_faction(args.faction)
 
@@ -388,6 +393,21 @@ def main():
             points.append(extract_point(p, args.faction, templates))
         except Exception as e:
             print(f"[trajectory]   FAILED: {e}", file=sys.stderr)
+    if args.json:
+        pts = sorted(points, key=lambda p: p["date"])
+        tempo = []
+        for key, label, unit in TEMPO_METRICS:
+            rates = _rate_series(pts, key)
+            if not rates:
+                tempo.append({"metric": key, "label": label, "verdict": "n/a"})
+                continue
+            tag, early, late = _verdict(rates)
+            tempo.append({"metric": key, "label": label, "unit": unit,
+                          "whole_run_avg": sum(r for _, r in rates) / len(rates),
+                          "early_avg": early, "last3_avg": late, "verdict": tag})
+        print(json.dumps({"faction": args.faction, "points": pts, "tempo": tempo},
+                         indent=2, default=str))
+        return
     report = render_report(points, args.faction)
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:

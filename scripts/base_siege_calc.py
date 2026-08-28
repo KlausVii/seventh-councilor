@@ -78,19 +78,21 @@ def tally_base(save_path, base_name):
     )
 
 
-def cascade(reactors, battlestations, citadels, p, kinetic_num2=0):
+def cascade(reactors, battlestations, citadels, p, kinetic_num2=0, as_json=False):
+    say = (lambda *a, **kw: None) if as_json else print
     supply0 = reactors * p['reactor_power']
     combat_demand = battlestations * p['bs_power'] + citadels * p['citadel_power']
     alt_mult = 1 + (p['altitude_km'] - 200) / 200
-    print(f"=== POWER CASCADE — {reactors} reactor farms, {battlestations} battlestations, "
-          f"{citadels} citadels ===")
-    print(f"supply {supply0} (={reactors}x{p['reactor_power']}) | combat demand {combat_demand} "
-          f"(bs {battlestations}x{p['bs_power']} + cit {citadels}x{p['citadel_power']})")
-    print(f"interception num = powered_bs x tier {p['tier']} x defenseDPS {p['defense_dps']:.1f} "
-          f"x {p['pd_mult']} x altitude {alt_mult:.1f} (alt {p['altitude_km']} km)\n")
+    say(f"=== POWER CASCADE — {reactors} reactor farms, {battlestations} battlestations, "
+        f"{citadels} citadels ===")
+    say(f"supply {supply0} (={reactors}x{p['reactor_power']}) | combat demand {combat_demand} "
+        f"(bs {battlestations}x{p['bs_power']} + cit {citadels}x{p['citadel_power']})")
+    say(f"interception num = powered_bs x tier {p['tier']} x defenseDPS {p['defense_dps']:.1f} "
+        f"x {p['pd_mult']} x altitude {alt_mult:.1f} (alt {p['altitude_km']} km)\n")
     leak_col = f" {'kinetics leak?':>16s}" if kinetic_num2 else ""
-    print(f"{'reactors killed':>15s} {'supply':>7s} {'bs powered':>11s} {'bs dark':>8s} "
-          f"{'interception num':>17s}{leak_col}")
+    say(f"{'reactors killed':>15s} {'supply':>7s} {'bs powered':>11s} {'bs dark':>8s} "
+        f"{'interception num':>17s}{leak_col}")
+    rows = []
     first_dark = half_dark = full = kin_leak = None
     for k in range(reactors + 1):
         supply = (reactors - k) * p['reactor_power']
@@ -108,30 +110,40 @@ def cascade(reactors, battlestations, citadels, p, kinetic_num2=0):
                 leak = " no (num2<=num)"
             if kin_leak is None and (num == 0 or kinetic_num2 > num):
                 kin_leak = k
-        print(f"{k:>15d} {supply:>7d} {bs_pow:>11d} {bs_dark:>8d} {num:>17,.0f}{leak}")
+        say(f"{k:>15d} {supply:>7d} {bs_pow:>11d} {bs_dark:>8d} {num:>17,.0f}{leak}")
+        rows.append({'reactors_killed': k, 'supply': supply,
+                     'battlestations_powered': bs_pow, 'battlestations_dark': bs_dark,
+                     'interception_num': num,
+                     'kinetics_leak': leak.strip() if kinetic_num2 else None})
         if first_dark is None and bs_dark >= 1:
             first_dark = k
         if half_dark is None and bs_dark >= battlestations / 2:
             half_dark = k
         if full is None and bs_pow == 0:
             full = k
-    print(f"\nThresholds: first battlestation dark at {first_dark} reactor kills; "
-          f"half dark at {half_dark}; full collapse at {full}.")
-    print("Each dark battlestation: -1 interception source, -1 STO beam/cycle (fleet survives "
-          "longer), armor x8->x4. Snowball accelerates past the first-dark point.")
+    say(f"\nThresholds: first battlestation dark at {first_dark} reactor kills; "
+        f"half dark at {half_dark}; full collapse at {full}.")
+    say("Each dark battlestation: -1 interception source, -1 STO beam/cycle (fleet survives "
+        "longer), armor x8->x4. Snowball accelerates past the first-dark point.")
     if kinetic_num2:
         need_full = math.ceil(num0 / KINETIC_NUM2['spinal_siege_coiler']) if (num0 := battlestations*p['tier']*p['defense_dps']*p['pd_mult']*alt_mult) else 0
-        print(f"\nKinetic num2 = {kinetic_num2:,.0f}. Kinetics leak only when num2 > num "
-              f"(interception is a hard wall until then — ratio>=1 = 100% intercepted).")
-        print(f"  -> your kinetics start landing at {kin_leak} reactor kills. To leak vs the "
-              f"FULLY powered base ({num0:,.0f}) you'd need ~{need_full} Spinal Siege Coiler Mk3 "
-              f"mounts (547 each) — infeasible. Kinetics are a FINISHER after lasers de-power, "
-              f"not an opener.")
-    print("DOCTRINE: 720cm+ Green Arc (or UV Phaser) LASERS vs the reactor farms (only beams "
-          "reach them) — Hybrid armor + ECM3 siege hulls (armor_calc.py), LOW orbit. Kinetics "
-          "(incl. siege coilers) are intercepted vs a powered base; carrying them there also "
-          "RAISES the ship's bombardmentValue -> draws MORE STO fire for zero gain. Siege "
-          "coilers' real value is the FLEET war (nose-breakers). Mk3>>Mk2>>Mk1; Spinal>Heavy.")
+        say(f"\nKinetic num2 = {kinetic_num2:,.0f}. Kinetics leak only when num2 > num "
+            f"(interception is a hard wall until then — ratio>=1 = 100% intercepted).")
+        say(f"  -> your kinetics start landing at {kin_leak} reactor kills. To leak vs the "
+            f"FULLY powered base ({num0:,.0f}) you'd need ~{need_full} Spinal Siege Coiler Mk3 "
+            f"mounts (547 each) — infeasible. Kinetics are a FINISHER after lasers de-power, "
+            f"not an opener.")
+    say("DOCTRINE: 720cm+ Green Arc (or UV Phaser) LASERS vs the reactor farms (only beams "
+        "reach them) — Hybrid armor + ECM3 siege hulls (armor_calc.py), LOW orbit. Kinetics "
+        "(incl. siege coilers) are intercepted vs a powered base; carrying them there also "
+        "RAISES the ship's bombardmentValue -> draws MORE STO fire for zero gain. Siege "
+        "coilers' real value is the FLEET war (nose-breakers). Mk3>>Mk2>>Mk1; Spinal>Heavy.")
+    return {'parameters': {'reactors': reactors, 'battlestations': battlestations,
+                           'citadels': citadels, 'kinetic_num2': kinetic_num2, **p},
+            'supply': supply0, 'combat_demand': combat_demand,
+            'altitude_multiplier': alt_mult, 'cascade': rows,
+            'thresholds': {'first_dark': first_dark, 'half_dark': half_dark,
+                           'full_collapse': full, 'kinetics_first_leak': kin_leak}}
 
 
 def main():
@@ -151,13 +163,16 @@ def main():
                     help='count of Spinal Siege Coiler Mk3 mounts (num2 547 each) to test kinetic leak')
     ap.add_argument('--heavy-siege-coiler-mk3', type=int, default=0, dest='heavy',
                     help='count of Heavy Siege Coiler Mk3 mounts (num2 362 each)')
+    ap.add_argument('--json', action='store_true')
     args = ap.parse_args()
 
+    t = None
     if args.save:
         if not args.base:
             sys.exit("--base <displayName> is required with --save")
         t = tally_base(args.save, args.base)
-        print(f"[{args.base}] modules: {t['raw']}\n")
+        if not args.json:
+            print(f"[{args.base}] modules: {t['raw']}\n")
         reactors, bs, cit = t['reactors'], t['battlestations'], t['citadels']
     elif args.reactors is not None and args.battlestations is not None:
         reactors, bs, cit = args.reactors, args.battlestations, args.citadels
@@ -169,7 +184,12 @@ def main():
              pd_mult=DEF['pd_mult'], tier=DEF['tier'], altitude_km=ALT_KM[args.altitude])
     kinetic_num2 = (args.spinal * KINETIC_NUM2['spinal_siege_coiler']
                     + args.heavy * KINETIC_NUM2['heavy_siege_coiler'])
-    cascade(reactors, bs, cit, p, kinetic_num2)
+    payload = cascade(reactors, bs, cit, p, kinetic_num2, as_json=args.json)
+    if args.json:
+        if t is not None:
+            payload['base'] = args.base
+            payload['target_modules'] = t['raw']
+        print(json.dumps(payload, indent=2, default=str))
 
 
 if __name__ == '__main__':

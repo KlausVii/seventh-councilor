@@ -4,7 +4,7 @@ crosses a target.
 
 Usage:
     python3 mc_capacity_projection.py [save.json|gz] [--faction X]
-        [--target 1000]
+        [--target 1000] [--json]
 
 Computes current MC available via extract_snapshot's calibrated four-source
 reconstruction (HQ + councilors + nations + POWERED positive-MC hab modules —
@@ -18,6 +18,7 @@ NOTE this is CAPACITY only. Usage grows too (mines/ships/consumer modules in
 flight) — for slack projections check extract_snapshot's "Pending net change".
 """
 import argparse
+import json
 
 from extract_snapshot import (
     load_save, get_factions, faction_id_by_template, extract_hab_inventory,
@@ -57,13 +58,15 @@ def main():
                     help='save file; omitted = newest save auto-detected')
     ap.add_argument('--faction', default=None)
     ap.add_argument('--target', type=float, default=1000)
+    ap.add_argument('--json', action='store_true')
     args = ap.parse_args()
     if not args.save:
         from ti_config import newest_save
         args.save = newest_save()
         if not args.save:
             raise SystemExit("No save given and none auto-found — pass a save path.")
-        print(f"(using newest save: {args.save})")
+        if not args.json:
+            print(f"(using newest save: {args.save})")
     from ti_config import require_faction
     args.faction = require_faction(args.faction)
 
@@ -83,14 +86,23 @@ def main():
     game_date = get_game_date(gs)
     if isinstance(game_date, tuple):
         game_date = game_date[0]
-    print(f"Game date {game_date} — capacity {available:.0f} "
-          f"(reconstruction, ~7 optimistic; top bar is truth), used {used:.0f}, "
-          f"slack {available - used:+.0f}")
+    if not args.json:
+        print(f"Game date {game_date} — capacity {available:.0f} "
+              f"(reconstruction, ~7 optimistic; top bar is truth), used {used:.0f}, "
+              f"slack {available - used:+.0f}")
 
     mc_table = load_mc_table()
     events = pending_producer_events(gs, fid, mc_table)
     if not events:
-        print("No positive-MC modules under construction.")
+        if args.json:
+            print(json.dumps({
+                'save': str(args.save), 'date': str(game_date),
+                'capacity': available, 'used': used, 'slack': available - used,
+                'target': args.target, 'pending_modules': [], 'by_month': [],
+                'final_capacity': available, 'target_crossed': None,
+            }, indent=2, default=str))
+        else:
+            print("No positive-MC modules under construction.")
         return
 
     cum = available
@@ -102,6 +114,26 @@ def main():
         by_month[d[:7]][0] += g
         if crossed is None and cum >= args.target:
             crossed = (d, name, habn, cum)
+
+    if args.json:
+        months, running = [], available
+        for mo in sorted(by_month):
+            running += by_month[mo][0]
+            months.append({'month': mo, 'delta_mc': by_month[mo][0],
+                           'capacity_month_end': running})
+        print(json.dumps({
+            'save': str(args.save), 'date': str(game_date),
+            'capacity': available, 'used': used, 'slack': available - used,
+            'target': args.target,
+            'pending_modules': [{'date': d, 'mc_gain': g, 'module': name, 'hab': habn}
+                                for d, g, name, habn in events],
+            'by_month': months,
+            'final_capacity': available + sum(e[1] for e in events),
+            'target_crossed': ({'date': crossed[0], 'module': crossed[1],
+                                'hab': crossed[2], 'capacity': crossed[3]}
+                               if crossed else None),
+        }, indent=2, default=str))
+        return
 
     print(f"\n{len(events)} pending producer modules, "
           f"+{sum(e[1] for e in events):.0f} total → final capacity "

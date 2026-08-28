@@ -321,15 +321,17 @@ def compute(save_path, faction_tmpl=None, resource='water', verbose=True,
     return per_hab, tot, mod_ledger
 
 
-def diff(a, b, faction=None, resource='water'):
+def diff(a, b, faction=None, resource='water', json_out=False):
     from ti_config import require_faction
     faction = require_faction(faction)
     _, ta, la = compute(a, faction, resource=resource, verbose=False)
     _, tb, lb = compute(b, faction, resource=resource, verbose=False)
-    print(f"\n=== {resource.upper()} DIFF: {os.path.basename(a)} -> {os.path.basename(b)} ===")
+    if not json_out:
+        print(f"\n=== {resource.upper()} DIFF: {os.path.basename(a)} -> {os.path.basename(b)} ===")
     # 'income' = mine production, 'crew_all' = crew LS, 'mat' = module upkeep, 'farm_off', 'net'
     for k in ('income', 'crew_all', 'mat', 'farm_off', 'net'):
-        print(f"  {k:9s}: {ta[k]:9.1f} -> {tb[k]:9.1f}   d {tb[k]-ta[k]:+8.1f}")
+        if not json_out:
+            print(f"  {k:9s}: {ta[k]:9.1f} -> {tb[k]:9.1f}   d {tb[k]-ta[k]:+8.1f}")
     def agg(l):
         d = defaultdict(lambda: [0.0, 0.0, 0.0, 0])
         for hab, mod, st, cw, mw, inc in l:
@@ -346,6 +348,16 @@ def diff(a, b, faction=None, resource='water'):
         if abs(dcost) > 0.05 or abs(dinc) > 0.05:
             rows.append((dcost - dinc, key, va, vb, dcost, dinc))
     rows.sort(key=lambda r: -r[0])        # biggest net hit first
+    if json_out:
+        return {
+            'resource': resource, 'save_a': os.path.basename(a), 'save_b': os.path.basename(b),
+            'totals': [{'key': k, 'before': ta[k], 'after': tb[k], 'delta': tb[k] - ta[k]}
+                       for k in ('income', 'crew_all', 'mat', 'farm_off', 'net')],
+            'module_shifts': [{'hab': key[0], 'module': key[1], 'state': key[2],
+                               'count_a': va[3], 'count_b': vb[3],
+                               'delta_cost': dcost, 'delta_income': dinc, 'delta_net': -d}
+                              for d, key, va, vb, dcost, dinc in rows[:35]],
+        }
     print(f"\n  Top (hab,module,state) {resource} shifts (Dcost - Dincome, +=worse):")
     print(f"  {'hab':26s} {'module':22s} {'state':14s} {'#a':>3s}{'#b':>4s} {'Dcost':>8s} {'Dinc':>8s} {'Dnet':>8s}")
     for d, key, va, vb, dcost, dinc in rows[:35]:
@@ -360,10 +372,22 @@ if __name__ == '__main__':
     ap.add_argument('--resource', default='water', choices=('water', 'volatiles'),
                     help='which life-support resource to balance (default water)')
     ap.add_argument('--diff', action='store_true')
+    ap.add_argument('--json', action='store_true', help='machine-readable output')
     a = ap.parse_args()
     from ti_config import require_faction
     a.faction = require_faction(a.faction)
-    if a.diff:
+    if a.json:
+        if a.diff:
+            payload = diff(a.saves[0], a.saves[1], a.faction, resource=a.resource,
+                           json_out=True)
+        else:
+            payload = {'resource': a.resource, 'faction': a.faction, 'saves': []}
+            for s in a.saves:
+                per_hab, tot, _ = compute(s, a.faction, resource=a.resource, verbose=False)
+                payload['saves'].append({'save': os.path.basename(s),
+                                         'habs': per_hab, 'totals': tot})
+        print(json.dumps(payload, indent=2, default=str))
+    elif a.diff:
         diff(a.saves[0], a.saves[1], a.faction, resource=a.resource)
     else:
         for s in a.saves:

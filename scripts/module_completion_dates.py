@@ -3,7 +3,7 @@
 
 Usage:
     python3 module_completion_dates.py [save.json|gz] [--faction X] \
-        [--module CommandCenter] [--module OperationsCenter] [--unpowered] [--destroyed]
+        [--module CommandCenter] [--module OperationsCenter] [--unpowered] [--destroyed] [--json]
 
 For each matching under-construction module prints: completion date, hab name,
 module, prior module being upgraded (if any), and the MC delta it will add when
@@ -65,13 +65,15 @@ def main():
                     help='list BUILT but unpowered modules instead')
     ap.add_argument('--destroyed', action='store_true',
                     help='attack forensics: list destroyed module slots with dates')
+    ap.add_argument('--json', action='store_true')
     args = ap.parse_args()
     if not args.save:
         from ti_config import newest_save
         args.save = newest_save()
         if not args.save:
             raise SystemExit("No save given and none auto-found — pass a save path.")
-        print(f"(using newest save: {args.save})")
+        if not args.json:
+            print(f"(using newest save: {args.save})")
     from ti_config import require_faction
     args.faction = require_faction(args.faction)
 
@@ -120,18 +122,30 @@ def main():
         })
 
     rows.sort(key=lambda r: r['date'])
-    if not rows:
-        print('No matching under-construction modules.')
-        return
-
     by_month = defaultdict(lambda: [0, 0])  # month -> [count, mc]
-    print(f"| Completion | Hab | Module | Upgrading from | ΔMC |")
-    print(f"|---|---|---|---|---:|")
     total = 0
     for r in rows:
         total += r['mc_delta']
         by_month[r['date'][:7]][0] += 1
         by_month[r['date'][:7]][1] += r['mc_delta']
+
+    if args.json:
+        mode = ('destroyed' if args.destroyed
+                else 'unpowered' if args.unpowered else 'under_construction')
+        print(json.dumps({
+            'save': str(args.save), 'mode': mode,
+            'modules': rows, 'total_mc_delta': total,
+            'by_month': [{'month': mo, 'count': by_month[mo][0],
+                          'mc_delta': by_month[mo][1]} for mo in sorted(by_month)],
+        }, indent=2, default=str))
+        return
+    if not rows:
+        print('No matching under-construction modules.')
+        return
+
+    print(f"| Completion | Hab | Module | Upgrading from | ΔMC |")
+    print(f"|---|---|---|---|---:|")
+    for r in rows:
         print(f"| {r['date']} | {r['hab']} | {r['module']} | "
               f"{r['prior'] or '—'} | {r['mc_delta']:+d} |")
     if args.destroyed:

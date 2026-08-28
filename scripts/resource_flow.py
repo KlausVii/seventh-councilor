@@ -53,6 +53,7 @@ def main():
     ap.add_argument('--faction', default=None)
     ap.add_argument('--resource', default=None)
     ap.add_argument('--days', type=int, default=45)
+    ap.add_argument('--json', action='store_true')
     args = ap.parse_args()
     from ti_config import require_faction
     args.faction = require_faction(args.faction)
@@ -64,7 +65,10 @@ def main():
     stock = fac.get('resources', {})
     fleet_water = (fac.get('fleetWetMassDuringHighestShipMaintainence') or {}).get('Water')
 
-    print(f"# Resource flow — {args.faction}, {now:%Y-%m-%d}, last {args.days} days")
+    out = {'faction': args.faction, 'date': f'{now:%Y-%m-%d}', 'window_days': args.days,
+           'net_by_resource': [], 'flows': []}
+    if not args.json:
+        print(f"# Resource flow — {args.faction}, {now:%Y-%m-%d}, last {args.days} days")
     if args.resource:
         resources = [args.resource]
     else:
@@ -76,10 +80,14 @@ def main():
             for e in entries:
                 if e.get('Date') and 0 <= (now - dt(e['Date'])).days <= args.days:
                     net[e.get('Resource')] += e.get('Amount', 0)
-        print("\nNET by resource:")
+        if not args.json:
+            print("\nNET by resource:")
         for r in RESOURCES:
             if abs(net.get(r, 0)) > 0.5:
-                print(f"  {r:<12} {net[r]:>12.1f}   (stock {stock.get(r, 0):.0f})")
+                out['net_by_resource'].append({'resource': r, 'net': net[r],
+                                               'stock': stock.get(r, 0)})
+                if not args.json:
+                    print(f"  {r:<12} {net[r]:>12.1f}   (stock {stock.get(r, 0):.0f})")
         resources = ['Water', 'Boost']  # default detail
 
     for r in resources:
@@ -95,13 +103,25 @@ def main():
                     agg[cat] += e.get('Amount', 0); cnt[cat] += 1
         if not agg:
             continue
-        print(f"\n## {r} by category (free stock now: {stock.get(r, 0):.1f}"
-              + (f"; fleet propellant load: {fleet_water:,.0f}" if r == 'Water' and fleet_water else "") + ")")
+        sec = {'resource': r, 'stock': stock.get(r, 0), 'categories': [], 'net': 0.0}
+        if r == 'Water' and fleet_water:
+            sec['fleet_propellant_load'] = fleet_water
+        if not args.json:
+            print(f"\n## {r} by category (free stock now: {stock.get(r, 0):.1f}"
+                  + (f"; fleet propellant load: {fleet_water:,.0f}" if r == 'Water' and fleet_water else "") + ")")
         tot = 0
         for cat, amt in sorted(agg.items(), key=lambda x: x[1]):
-            print(f"  {cat:<34} {amt:>12.1f}  ({cnt[cat]} tx)")
+            sec['categories'].append({'category': cat, 'amount': amt, 'transactions': cnt[cat]})
+            if not args.json:
+                print(f"  {cat:<34} {amt:>12.1f}  ({cnt[cat]} tx)")
             tot += amt
-        print(f"  {'NET':<34} {tot:>12.1f}")
+        sec['net'] = tot
+        if not args.json:
+            print(f"  {'NET':<34} {tot:>12.1f}")
+        out['flows'].append(sec)
+
+    if args.json:
+        print(json.dumps(out, indent=2, default=str))
 
 
 if __name__ == '__main__':

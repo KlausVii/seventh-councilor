@@ -18,7 +18,7 @@ Usage:
     python3 colony_planner.py <save> --include-free        # rank everything incl. free-found
     python3 colony_planner.py <save> --max-alien 2.0       # drop targets w/ alien fleet closer
 
-Options: --faction <templateName> · --top N · --resource water|volatiles|metals|nobles|fissiles
+Options: --faction <templateName> · --top N · --resource water|volatiles|metals|nobles|fissiles · --json
 
 🕶 SPOILER RULE (P13): yields are quoted ONLY for bodies with `faction.intel[body] >= 1.0`
 (= Prospected; 0.1 = prospector/probe en route; absent = unknown). Unprospected bodies are
@@ -209,11 +209,9 @@ def au(w, bid, ref):
     return math.dist(w.pos[bid], w.pos[ref]) / AU
 
 
-def cmd_free(w):
-    print("=== FREE FOUNDING (own hab + ACTIVE construction module in the same sun-system) ===")
-    print("    no ship, no outpost kit needed — E30\n")
+def cmd_free(w, as_json=False):
     rows = sorted(w.free_tier.items(), key=lambda x: (-x[1], w.bodies[x[0]].get('displayName')))
-    print(f"{'System (sun-parent)':22s} {'cap':>4s}  vacant prospected sites in system")
+    out = []
     for sp, t in rows:
         # every body sharing this sun-parent
         n_sites, bodies_ = 0, []
@@ -223,14 +221,25 @@ def cmd_free(w):
             v = len(w.vacant_by_body.get(bid, []))
             if v:
                 n_sites += v
-                bodies_.append(f"{w.bodies[bid].get('displayName')}×{v}")
-        extra = f"  {n_sites:>3} vacant: " + ', '.join(bodies_[:6]) if n_sites else "  (none vacant)"
-        print(f"{w.bodies[sp].get('displayName'):22s}  T{t}{extra}")
+                bodies_.append({'body': w.bodies[bid].get('displayName'), 'vacant': v})
+        out.append({'system': w.bodies[sp].get('displayName'), 'tier': t,
+                    'vacant_sites': n_sites, 'bodies': bodies_})
+    if as_json:
+        print(json.dumps({'free_founding_systems': out}, indent=2, default=str))
+        return
+    print("=== FREE FOUNDING (own hab + ACTIVE construction module in the same sun-system) ===")
+    print("    no ship, no outpost kit needed — E30\n")
+    print(f"{'System (sun-parent)':22s} {'cap':>4s}  vacant prospected sites in system")
+    for r in out:
+        bodies_ = [f"{b['body']}×{b['vacant']}" for b in r['bodies']]
+        extra = (f"  {r['vacant_sites']:>3} vacant: " + ', '.join(bodies_[:6])
+                 if r['vacant_sites'] else "  (none vacant)")
+        print(f"{r['system']:22s}  T{r['tier']}{extra}")
     print("\nTip: a system's cap is the BEST module in it — build a NanofacturingComplex on any")
     print("hab to lift the whole system to T3 (cheaper than shipping kits).")
 
 
-def cmd_body(w, name, earth):
+def cmd_body(w, name, earth, as_json=False):
     bid = w.body_id(name)
     if bid is None:
         raise SystemExit(f'body "{name}" not found')
@@ -244,6 +253,31 @@ def cmd_body(w, name, earth):
     v = w.bodies[bid]
     naf = w.nearest_alien(bid)
     ft = w.free_found_tier(bid)
+    if as_json:
+        # 🕶 P13: per-site yields only when the body is PROSPECTED (intel >= 1.0)
+        prospected = w.prospected(bid)
+        print(json.dumps({
+            'body': name,
+            'barycenter_chain': chain,
+            'sun_parent': w.bodies[w.sun_parent(bid)].get('displayName'),
+            'au_sun': au(w, bid, w.body_id('Sol') or bid),
+            'au_earth': au(w, bid, earth),
+            'max_hab_tier': v.get('maxHabTier'),
+            'alien_territory': v.get('alienTerritory'),
+            'intel': w.intel.get(bid),
+            'prospected': prospected,
+            'probe_en_route': w.probe_en_route(bid),
+            'nearest_alien_au': naf[0], 'nearest_alien_ships': naf[1],
+            'free_found_tier': ft, 'needs_ship': not ft,
+            'existing_habs': [{'hab': n, 'owner': o} for n, o in w.owners(bid)],
+            'sites': [{'site': s.get('displayName'),
+                       'vacant': s.get('hab') is None,
+                       'yields_month': ({r: w.monthly(s, r) for r in RESOURCES}
+                                        if prospected else None),
+                       'redacted': not prospected}
+                      for s in w.sites_by_body.get(bid, [])],
+        }, indent=2, default=str))
+        return
     print(f"=== {name} ===")
     print(f"  barycenter chain : {' → '.join(chain)}")
     print(f"  sun-parent       : {w.bodies[w.sun_parent(bid)].get('displayName')}")
@@ -299,6 +333,34 @@ def cmd_rank(w, args, earth):
         sc = prior[0] if args.unprospected else w.score(bid, args.resource)
         rows.append((sc, bid, ft, naf, prior))
     rows.sort(key=lambda r: -r[0])
+    if args.json:
+        out = []
+        for sc, bid, ft, naf, prior in rows[:args.top]:
+            v = w.bodies[bid]
+            row = {'body': v.get('displayName'), 'score': sc,
+                   'au_sun': au(w, bid, w.body_id('Sol') or bid),
+                   'au_earth': au(w, bid, earth),
+                   'vacant_sites': len(w.vacant_by_body[bid]),
+                   'max_hab_tier': v.get('maxHabTier'),
+                   'nearest_alien_au': naf[0], 'nearest_alien_ships': naf[1],
+                   'free_found_tier': ft, 'needs_ship': not ft}
+            if args.unprospected:
+                # 🕶 P13: unprospected — real yields stay hidden; PRIORS only (E33)
+                _, counts, means, jumps = prior
+                row.update({'yields_month': None, 'redacted': True,
+                            'prior_means': means, 'prior_jumps': jumps,
+                            'profiles': counts,
+                            'prospector_en_route': w.probe_en_route(bid)})
+            else:
+                row['yields_month'] = {r: w.body_yield(bid, r) for r in RESOURCES}
+            out.append(row)
+        print(json.dumps({
+            'mode': ('unprospected_priors' if args.unprospected
+                     else 'all_targets' if include_free else 'ship_only_targets'),
+            'resource': args.resource, 'max_alien_au': args.max_alien,
+            'targets': out,
+        }, indent=2, default=str))
+        return
     what = ('UNPROSPECTED (survey-capable ships only; PRIOR expectations, not yields)'
             if args.unprospected
             else ('ALL targets (incl. free-founding)' if include_free else 'SHIP-ONLY targets'))
@@ -361,6 +423,7 @@ def main():
     ap.add_argument('--unprospected', action='store_true', help='list unprospected targets (yields redacted)')
     ap.add_argument('--max-alien', type=float, default=1.0, help='drop targets with an alien fleet closer than this (AU)')
     ap.add_argument('--top', type=int, default=20)
+    ap.add_argument('--json', action='store_true', help='machine-readable output (same redactions)')
     args = ap.parse_args()
     from ti_config import require_faction
     args.faction = require_faction(args.faction)
@@ -368,9 +431,9 @@ def main():
     w = World(args.save, args.faction)
     earth = w.body_id('Earth')
     if args.free:
-        cmd_free(w)
+        cmd_free(w, args.json)
     elif args.body:
-        cmd_body(w, args.body, earth)
+        cmd_body(w, args.body, earth, args.json)
     else:
         cmd_rank(w, args, earth)
 

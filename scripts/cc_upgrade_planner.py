@@ -2,7 +2,7 @@
 """Priority list of OperationsCenter → CommandCenter upgrades to queue next.
 
 Usage:
-    python3 cc_upgrade_planner.py [save.json|gz] [--faction X] [--sort days|metals]
+    python3 cc_upgrade_planner.py [save.json|gz] [--faction X] [--sort days|metals] [--json]
 
 Finds every faction hab with a COMPLETED OperationsCenter and no CommandCenter
 queued/built, and ranks by SPEED (the MC gain is +10 everywhere, and the metals
@@ -56,6 +56,7 @@ Pacing reminder printed with the list: each click pays the full cost up front
 never queue past the current metals buffer.
 """
 import argparse
+import json
 from collections import defaultdict
 
 from extract_snapshot import load_save, kv_items, get_factions, \
@@ -268,13 +269,15 @@ def main():
                     help="ranking key within each tier/power group: 'days' "
                          "(default — minimises the −4 MC blackout while the "
                          "OpsCenter is dark, E28) or 'metals' (cheapest first)")
+    ap.add_argument('--json', action='store_true')
     args = ap.parse_args()
     if not args.save:
         from ti_config import newest_save
         args.save = newest_save()
         if not args.save:
             raise SystemExit("No save given and none auto-found — pass a save path.")
-        print(f"(using newest save: {args.save})")
+        if not args.json:
+            print(f"(using newest save: {args.save})")
     from ti_config import require_faction
     args.faction = require_faction(args.faction)
 
@@ -286,6 +289,15 @@ def main():
     factions = get_factions(gs)
     fid = faction_id_by_template(factions, args.faction)
     cands, unpowered = collect_candidates(gs, fid, save_date, sort=args.sort)
+
+    if args.json:
+        print(json.dumps({
+            'save': str(args.save), 'date': str(save_date), 'sort': args.sort,
+            'unpowered_opscenters': unpowered,
+            'candidates': cands,
+            'total_metals': sum(c['metals'] for c in cands),
+        }, indent=2, default=str))
+        return
 
     print(f"{len(cands)} OC→CC candidates (each +10 MC; +6 net vs pre-click "
           f"since the OC goes offline at click time, lesson E28)\n")

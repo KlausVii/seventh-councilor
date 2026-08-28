@@ -85,6 +85,7 @@ def main():
     ap.add_argument('--all', action='store_true',
                     help='include every drive of the walked families, even '
                          'clearly-dominated low rungs')
+    ap.add_argument('--json', action='store_true', help='machine-readable output')
     args = ap.parse_args()
     from ti_config import require_faction
     args.faction = require_faction(args.faction)
@@ -258,6 +259,19 @@ def main():
         # or EV ≥ 1000" to drop the clearly-dominated bottom rungs.
         rows = [r for r in rows if r['combat'] >= 10 or r['ev'] >= 1000]
     rows.sort(key=lambda r: (r['glob_beyond'] + r['proj_rp']))
+    base_row = pair_row(base_d, args.baseline) if base_d else None
+
+    if args.json:
+        payload = {
+            'faction': args.faction,
+            'radiator': {'name': rad_name, 't_per_gw_waste': rad_tgw},
+            'research_rate_pct': CONFIG['research_rate_pct'],
+            'in_slot_globals': sorted(in_slot),
+            'baseline': base_row,
+            'pairs': [r for r in rows if not r['researched']],
+        }
+        print(json.dumps(payload, indent=2, default=str))
+        return
 
     print(f"# Fusion reactor+drive pair planner — {args.faction}")
     print(f"Radiator assumption: {rad_name} ({rad_tgw:.1f} t per GW of waste heat). "
@@ -279,8 +293,8 @@ def main():
               f"{r['glob_beyond']:8,.0f} {r['proj_rp']:8,.0f} {r['tank']:>18s}  "
               f"{'; '.join(r['flags'])}{mark}")
 
-    if base_d:
-        show(pair_row(base_d, args.baseline), '  ← baseline')
+    if base_row:
+        show(base_row, '  ← baseline')
     for r in rows:
         if r['researched']:
             continue

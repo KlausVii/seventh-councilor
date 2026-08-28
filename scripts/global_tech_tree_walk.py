@@ -29,9 +29,11 @@ def main():
                     help="Walk unlocks FROM these projects instead of the global-tech menu. "
                          "Comma-separated dataNames, or 'cat:<Category>' to take every project "
                          "of that category that is available/paused/pending-roll for the faction.")
+    ap.add_argument('--json', action='store_true')
     args = ap.parse_args()
     from ti_config import require_faction
     args.faction = require_faction(args.faction)
+    say = (lambda *a, **kw: None) if args.json else print
 
     techs = json.load(open(TPL_DIR / 'TITechTemplate.json'))
     projects = json.load(open(TPL_DIR / 'TIProjectTemplate.json'))
@@ -69,13 +71,18 @@ def main():
                        if p.get('techCategory') == cat and proj_eligible(p) and not missing(p.get('prereqs'))})
         else:
             roots = [x for x in args.projects.split(',') if x]
-        print(f"# Unlock walk from projects: {', '.join(roots)}\n")
+        say(f"# Unlock walk from projects: {', '.join(roots)}\n")
+        out = {'mode': 'projects', 'roots': []}
         for rn in roots:
             r = proj_by_name.get(rn)
             if not r:
-                print(f'## {rn} — NOT FOUND\n'); continue
+                out['roots'].append({'data_name': rn, 'found': False})
+                say(f'## {rn} — NOT FOUND\n'); continue
             state = 'DONE' if rn in fin_proj else ('AVAILABLE' if rn in avail_proj else 'pending-roll/locked')
-            print(f"## {r.get('friendlyName', rn)} [`{rn}`] — {r.get('researchCost',0):,} RP (template) · {state}")
+            node = {'data_name': rn, 'found': True, 'name': r.get('friendlyName', rn),
+                    'cost_rp_template': r.get('researchCost', 0), 'state': state,
+                    'unlocks_projects': [], 'unlocks_techs': []}
+            say(f"## {r.get('friendlyName', rn)} [`{rn}`] — {r.get('researchCost',0):,} RP (template) · {state}")
             hits = False
             for p in projects:
                 if rn in (p.get('prereqs') or []) or rn == p.get('altPrereq0'):
@@ -83,19 +90,35 @@ def main():
                     hits = True
                     m = [x for x in missing(p.get('prereqs')) if x != rn]
                     tag = f" (also needs: {', '.join(m)})" if m else " ✅ would be unlockable"
-                    print(f"  - PROJ {p.get('friendlyName', p['dataName'])} [{p.get('researchCost',0):,}]{tag}")
+                    child = {'data_name': p['dataName'], 'name': p.get('friendlyName', p['dataName']),
+                             'cost_rp_template': p.get('researchCost', 0), 'also_needs': m,
+                             'projects': []}
+                    say(f"  - PROJ {p.get('friendlyName', p['dataName'])} [{p.get('researchCost',0):,}]{tag}")
                     for gp in projects:
                         if p['dataName'] in (gp.get('prereqs') or []) and proj_eligible(gp):
                             m2 = [x for x in missing(gp.get('prereqs')) if x != p['dataName']]
-                            print(f"      - proj {gp.get('friendlyName', gp['dataName'])} [{gp.get('researchCost',0):,}]" + (f" (also: {', '.join(m2)})" if m2 else ""))
+                            child['projects'].append({'data_name': gp['dataName'],
+                                                      'name': gp.get('friendlyName', gp['dataName']),
+                                                      'cost_rp_template': gp.get('researchCost', 0),
+                                                      'also_needs': m2})
+                            say(f"      - proj {gp.get('friendlyName', gp['dataName'])} [{gp.get('researchCost',0):,}]" + (f" (also: {', '.join(m2)})" if m2 else ""))
+                    node['unlocks_projects'].append(child)
             for t in techs:
                 if rn in (t.get('prereqs') or []):
                     hits = True
                     m = [x for x in missing(t.get('prereqs')) if x != rn]
-                    print(f"  - TECH {t.get('friendlyName', t['dataName'])} [{t.get('researchCost',0):,} {t.get('techCategory','?')}]" + (f" (also needs: {', '.join(m)})" if m else " ✅"))
+                    node['unlocks_techs'].append({'data_name': t['dataName'],
+                                                  'name': t.get('friendlyName', t['dataName']),
+                                                  'cost_rp_template': t.get('researchCost', 0),
+                                                  'category': t.get('techCategory', '?'),
+                                                  'also_needs': m})
+                    say(f"  - TECH {t.get('friendlyName', t['dataName'])} [{t.get('researchCost',0):,} {t.get('techCategory','?')}]" + (f" (also needs: {', '.join(m)})" if m else " ✅"))
             if not hits:
-                print("  - (nothing in the tree depends on it)")
-            print()
+                say("  - (nothing in the tree depends on it)")
+            say()
+            out['roots'].append(node)
+        if args.json:
+            print(json.dumps(out, indent=2, default=str))
         return
 
     # candidates: unfinished techs, all prereqs met
@@ -109,29 +132,56 @@ def main():
     def children_projects(name):
         return [p for p in projects if name in (p.get('prereqs') or []) and proj_eligible(p)]
 
-    print(f"# Global techs queueable after: {', '.join(sorted(assumed)) or '(current state)'}\n")
+    say(f"# Global techs queueable after: {', '.join(sorted(assumed)) or '(current state)'}\n")
+    out = {'mode': 'candidates', 'assumed': sorted(assumed), 'candidates': []}
     for t in cands:
         n = t['dataName']
-        print(f"## {t.get('friendlyName', n)}  [`{n}`] — {t.get('researchCost', 0):,} RP (template) · {t.get('techCategory','?')}")
+        node = {'data_name': n, 'name': t.get('friendlyName', n),
+                'cost_rp_template': t.get('researchCost', 0),
+                'category': t.get('techCategory', '?'), 'projects': [], 'techs': []}
+        say(f"## {t.get('friendlyName', n)}  [`{n}`] — {t.get('researchCost', 0):,} RP (template) · {t.get('techCategory','?')}")
         for p in children_projects(n):
             m = missing(p.get('prereqs'))
             m = [x for x in m if x != n]
             tag = f" (also needs: {', '.join(m)})" if m else " ✅ unlockable"
             star = ' 🔓ALREADY-AVAIL' if p['dataName'] in avail_proj else ''
-            print(f"  - PROJ {p.get('friendlyName', p['dataName'])} [{p.get('researchCost', 0):,}]{tag}{star}")
+            node['projects'].append({'data_name': p['dataName'],
+                                     'name': p.get('friendlyName', p['dataName']),
+                                     'cost_rp_template': p.get('researchCost', 0),
+                                     'also_needs': m,
+                                     'already_available': p['dataName'] in avail_proj})
+            say(f"  - PROJ {p.get('friendlyName', p['dataName'])} [{p.get('researchCost', 0):,}]{tag}{star}")
         for c in children_techs(n):
             m = [x for x in missing(c.get('prereqs')) if x != n]
             tag = f" (also needs: {', '.join(m)})" if m else " ✅ next-menu"
-            print(f"  - TECH {c.get('friendlyName', c['dataName'])} [{c.get('researchCost', 0):,} {c.get('techCategory','?')}]{tag}")
+            tnode = {'data_name': c['dataName'], 'name': c.get('friendlyName', c['dataName']),
+                     'cost_rp_template': c.get('researchCost', 0),
+                     'category': c.get('techCategory', '?'), 'also_needs': m,
+                     'projects': [], 'techs': []}
+            say(f"  - TECH {c.get('friendlyName', c['dataName'])} [{c.get('researchCost', 0):,} {c.get('techCategory','?')}]{tag}")
             for gp in children_projects(c['dataName']):
                 m2 = [x for x in missing(gp.get('prereqs')) if x != c['dataName']]
                 tag2 = f" (also: {', '.join(m2)})" if m2 else ""
-                print(f"      - proj {gp.get('friendlyName', gp['dataName'])} [{gp.get('researchCost', 0):,}]{tag2}")
+                tnode['projects'].append({'data_name': gp['dataName'],
+                                          'name': gp.get('friendlyName', gp['dataName']),
+                                          'cost_rp_template': gp.get('researchCost', 0),
+                                          'also_needs': m2})
+                say(f"      - proj {gp.get('friendlyName', gp['dataName'])} [{gp.get('researchCost', 0):,}]{tag2}")
             for gc in children_techs(c['dataName']):
                 m2 = [x for x in missing(gc.get('prereqs')) if x != c['dataName']]
                 tag2 = f" (also: {', '.join(m2)})" if m2 else ""
-                print(f"      - tech {gc.get('friendlyName', gc['dataName'])} [{gc.get('researchCost', 0):,} {gc.get('techCategory','?')}]{tag2}")
-        print()
+                tnode['techs'].append({'data_name': gc['dataName'],
+                                       'name': gc.get('friendlyName', gc['dataName']),
+                                       'cost_rp_template': gc.get('researchCost', 0),
+                                       'category': gc.get('techCategory', '?'),
+                                       'also_needs': m2})
+                say(f"      - tech {gc.get('friendlyName', gc['dataName'])} [{gc.get('researchCost', 0):,} {gc.get('techCategory','?')}]{tag2}")
+            node['techs'].append(tnode)
+        out['candidates'].append(node)
+        say()
+
+    if args.json:
+        print(json.dumps(out, indent=2, default=str))
 
 if __name__ == '__main__':
     main()

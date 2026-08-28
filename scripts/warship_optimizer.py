@@ -1165,9 +1165,32 @@ def print_build_times(hulls: Optional[List[str]] = None) -> None:
 
 
 if __name__ == '__main__':
-    import sys
-    if '--build-times' in sys.argv:
-        print_build_times()
+    import argparse
+    _ap = argparse.ArgumentParser(
+        description='Warship design library + CLI. With no flags, runs the '
+                    'calibration demo (human-formatted only).')
+    _ap.add_argument('--build-times', action='store_true',
+                     help='rank buildable human hulls by build time (S28)')
+    _ap.add_argument('--json', action='store_true',
+                     help='machine-readable output (--build-times only; the '
+                          'calibration demo/sweeps stay human-formatted)')
+    _cli = _ap.parse_args()
+    if _cli.build_times:
+        if _cli.json:
+            _hulls = [n for n, h in _load_template('TIShipHullTemplate.json').items()
+                      if not n.startswith('Alien') and not h.get('noShipyardBuild')
+                      and h.get('dataName') == n]
+            _rows = sorted({h: hull_template(h)['baseConstructionTime_days']
+                            for h in _hulls}.items(), key=lambda kv: kv[1])
+            _payload = {'build_times': [
+                {'hull': h, 'base_days': base,
+                 'yard_days': dict(zip(('slow', 'mid', 'best'), hull_build_days(h)))}
+                for h, base in _rows]}
+            print(json.dumps(_payload, indent=2, default=str))
+        else:
+            print_build_times()
+    elif _cli.json:
+        _ap.error('--json needs --build-times (the demo/sweep modes are human-only)')
     else:
         _demo_baseline()
         _demo_calibration_bc()

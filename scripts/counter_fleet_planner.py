@@ -93,6 +93,7 @@ def main():
     ap.add_argument('--screen-hulls', type=int, default=0, help='how many screen ships you plan to build')
     ap.add_argument('--pd-ion', default='PointDefenseIonBattery')
     ap.add_argument('--pd-gun', default='40mmAutocannon')
+    ap.add_argument('--json', action='store_true', help='machine-readable output')
     a = ap.parse_args()
 
     from ti_config import require_faction
@@ -116,9 +117,7 @@ def main():
         return [(e if isinstance(e, str) else (e.get('moduleName') or e.get('templateName')))
                 for e in (d.get(k) or [])]
 
-    print(f'# Counter-fleet plan vs {a.fleet}  ({facs.get(owner,{}).get("templateName")})')
     n_ships = len(fleet.get('ships') or [])
-    print(f'Enemy: {n_ships} ships\n')
 
     miss_rate = 0.0; miss_bays = 0
     slug_kg = 0.0;  slug_mounts = 0
@@ -146,6 +145,49 @@ def main():
                 beams += 1; row['beam'] += 1
         per_ship.append(row)
 
+    ion = WT.get(a.pd_ion, (None, {}))[1]
+    gun = WT.get(a.pd_gun, (None, {}))[1]
+    ion_rate = shots_per_s(ion)           # kills/s (any hit kills a missile)
+    gun_rate = pd_erosion_kg_per_s(gun)   # kg/s eroded
+    need_ion = (miss_rate / ion_rate) if ion_rate else None
+    need_gun = (slug_kg / gun_rate) if gun_rate else None
+    ni = ng = None
+    if a.screen_hulls and ion_rate and gun_rate:
+        ni = max(1, round(miss_rate / ion_rate + 0.5)); ng = max(1, round(slug_kg / gun_rate + 0.5))
+
+    if a.json:
+        payload = {
+            'enemy_fleet': a.fleet,
+            'enemy_faction': facs.get(owner, {}).get('templateName'),
+            'enemy_ship_count': n_ships,
+            'ships': [{'name': r['name'], 'ship_class': r['cls'], 'missile': r['missile'],
+                       'slug': r['slug'], 'beam': r['beam'], 'pd': r['pd']}
+                      for r in per_ship],
+            'threat_channels': {
+                'missile_bays': miss_bays, 'missile_launches_per_s': miss_rate,
+                'slug_mounts': slug_mounts, 'slug_kg_per_s': slug_kg,
+                'beam_mounts': beams, 'enemy_pd_mounts': enemy_pd,
+            },
+            'counter_sizing': {
+                'pd_ion': a.pd_ion, 'ion_kills_per_s': ion_rate,
+                'ion_mounts_needed': need_ion,
+                'pd_gun': a.pd_gun, 'gun_erosion_kg_per_s': gun_rate,
+                'gun_mounts_needed': need_gun,
+                'navalgun_saturation_cap': SATURATION['NavalGun'],
+            },
+        }
+        if ni is not None:
+            payload['screen_spread'] = {
+                'hulls': a.screen_hulls, 'ion_total': ni, 'gun_total': ng,
+                'ion_per_hull': max(1, -(-ni // a.screen_hulls)),
+                'gun_per_hull': max(1, -(-ng // a.screen_hulls)),
+            }
+        print(json.dumps(payload, indent=2, default=str))
+        return
+
+    print(f'# Counter-fleet plan vs {a.fleet}  ({facs.get(owner,{}).get("templateName")})')
+    print(f'Enemy: {n_ships} ships\n')
+
     print(f"{'ship':22} {'class':28} {'msl':>4} {'slug':>5} {'beam':>5} {'PD':>3}")
     for r in per_ship:
         print(f"{str(r['name'])[:22]:22} {str(r['cls'])[:28]:28} {r['missile']:4} {r['slug']:5} {r['beam']:5} {r['pd']:3}")
@@ -155,26 +197,18 @@ def main():
     print(f"  2. KINETIC SLUGS      : {slug_mounts} mounts -> {slug_kg:.1f} kg/s inbound mass")
     print(f"  3. BEAMS (armor only) : {beams} mounts  |  their PD mounts: {enemy_pd}")
 
-    ion = WT.get(a.pd_ion, (None, {}))[1]
-    gun = WT.get(a.pd_gun, (None, {}))[1]
-    ion_rate = shots_per_s(ion)           # kills/s (any hit kills a missile)
-    gun_rate = pd_erosion_kg_per_s(gun)   # kg/s eroded
-
     print(f"\n## Counter sizing")
     if ion_rate:
-        need_ion = miss_rate / ion_rate
         print(f"  {a.pd_ion}: {ion_rate:.3f} kills/s each (1 shot / {ion.get('cooldown_s')}s, any hit kills)")
         print(f"    -> need >= {need_ion:.1f} mounts to match sustained launch rate "
               f"(round UP; add margin for misses/geometry)")
     if gun_rate:
-        need_gun = slug_kg / gun_rate if gun_rate else 0
         print(f"  {a.pd_gun}: {gun_rate:.1f} kg/s eroded each "
               f"({gun.get('salvo_shots')} shells / {gun.get('cooldown_s')}s)")
         print(f"    -> need >= {need_gun:.1f} mounts to fully neutralise the slug stream")
         print(f"    (erosion is PROPORTIONAL - partial coverage still cuts damage linearly;")
         print(f"     NavalGun saturation caps at {SATURATION['NavalGun']} engagers per projectile)")
-    if a.screen_hulls and ion_rate and gun_rate:
-        ni = max(1, round(miss_rate / ion_rate + 0.5)); ng = max(1, round(slug_kg / gun_rate + 0.5))
+    if ni is not None:
         print(f"\n## Spread over {a.screen_hulls} screen hulls")
         print(f"  total needed: ~{ni} Ion + ~{ng} autocannon")
         print(f"  per hull    : {ni/a.screen_hulls:.1f} Ion + {ng/a.screen_hulls:.1f} autocannon "

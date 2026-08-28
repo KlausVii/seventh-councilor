@@ -5,7 +5,7 @@ distance to the player's fleets/yards, and the assets able to take or found them
 Usage:
     python3 resource_site_planner.py <save.json> [--resource fissiles|metals|water|volatiles|nobles|all] [--min-monthly 8]
         [--faction <templateName>] [--avoid EscapeCouncil,DestroyCouncil]
-        [--unclaimed-only] [--weights metals=8,water=5,nobles=5,fissiles=4,volatiles=4]
+        [--unclaimed-only] [--weights metals=8,water=5,nobles=5,fissiles=4,volatiles=4] [--json]
 
     --resource all → combined weighted score across all five resources (colony-site
     planning: "where should my outpost-kit ships found the next surface mine"). Adds a
@@ -91,6 +91,7 @@ def main():
                     help='drop sites that already have any hab on them')
     ap.add_argument('--weights', default='metals=8,water=5,nobles=5,fissiles=4,volatiles=4',
                     help='resource weights for --resource all combined score')
+    ap.add_argument('--json', action='store_true', help='machine-readable output (same redactions)')
     args = ap.parse_args()
     from ti_config import require_faction
     args.faction = require_faction(args.faction)
@@ -266,11 +267,44 @@ def main():
         # free-foundable sites need no ship, so don't assign a kit fleet + ETA to them
         d_kit = (min(((math.dist(bp, f['pos']) / AU, f) for f in kit_fleets), key=lambda x: x[0])
                  if (not free_t and bp and kit_fleets) else None)
+        # accel-limited burn/coast/burn (shared model, +0/−7% vs the in-game planner)
+        eta_days = None
+        if d_kit and d_kit[1]['min_maxdv'] > 0 and d_kit[1]['min_acc'] > 0:
+            from transfer_eta import eta_seconds
+            t, _, _ = eta_seconds(d_kit[0] * AU, d_kit[1]['min_acc'], d_kit[1]['min_maxdv'] * 1000 * 0.975)
+            eta_days = t / 86400
         rows.append({'site': st.get('displayName') or f'site{sid}', 'body': b, 'monthly_raw': monthly,
                      'score': score, 'per': per, 'free_tier': free_t,
                      'hab': hn, 'owner': hf, 'd_yard_au': d_yard[0], 'yard': f'{d_yard[1]} ({d_yard[2]})',
-                     'd_kit_au': d_kit[0] if d_kit else None, 'kit_fleet': d_kit[1] if d_kit else None})
+                     'd_kit_au': d_kit[0] if d_kit else None, 'kit_fleet': d_kit[1] if d_kit else None,
+                     'eta_days': eta_days})
     rows.sort(key=lambda x: -x['score'])
+
+    if args.json:
+        fkeys = ('name', 'near', 'n', 'marines', 'kits', 'min_dv', 'min_maxdv',
+                 'min_acc', 'transfer', 'dest', 'arrival', 'comp')
+        print(json.dumps({
+            'save': args.save, 'resource': args.resource,
+            'min_monthly': args.min_monthly,
+            'weights': weights if combined else None,
+            # 🕶 sites on non-prospected bodies never reach `rows` (intel < 1.0 above);
+            # they appear only in redacted_unprospected, without yields
+            'sites': [{**{k: v for k, v in r.items() if k != 'kit_fleet'},
+                       'kit_fleet': r['kit_fleet']['name'] if r['kit_fleet'] else None}
+                      for r in rows],
+            'redacted_unprospected': [
+                {'body': b, 'vacant_sites': n, 'prospector_en_route': i >= 0.1}
+                for b, (n, i) in sorted(hidden.items(), key=lambda x: str(x[0]))],
+            'kit_fleets': [{k: f[k] for k in fkeys}
+                           for f in sorted(kit_fleets, key=lambda x: x['name'])],
+            'fleets': [{k: f[k] for k in fkeys}
+                       for f in sorted(fleets, key=lambda x: -x['marines'])
+                       if f['marines'] or f['kits'] or f['n'] >= 4],
+            'shipyard_bodies': [{'body': yb, 'yard_habs': [n for n, b, _ in yard_pts if b == yb]}
+                                for yb in dict.fromkeys(b for _, b, _ in yard_pts)],
+            'founder_habs': len(founder_habs),
+        }, indent=2, default=str))
+        return
 
     print(f"# {args.resource} site acquisition — {os.path.basename(args.save)}")
     print("Only PROSPECTED bodies are ranked (faction intel ≥ 1.0); unprospected yields are "
@@ -294,12 +328,9 @@ def main():
             kcol = f"no ship — free-found T{r['free_tier']}"
         elif r['d_kit_au'] is not None:
             kcol = f"{r['d_kit_au']:.2f} {r['kit_fleet']['name']}"
-            # accel-limited burn/coast/burn (shared model, +0/−7% vs the in-game planner)
-            kf = r['kit_fleet']
-            if kf['min_maxdv'] > 0 and kf['min_acc'] > 0:
-                from transfer_eta import eta_seconds
-                t, _, _ = eta_seconds(r['d_kit_au'] * AU, kf['min_acc'], kf['min_maxdv'] * 1000 * 0.975)
-                eta = f'{t / 86400:.0f}d' if t < 100 * 86400 else f'{t / 86400 / 30.44:.1f}mo'
+            if r['eta_days'] is not None:
+                eta = (f"{r['eta_days']:.0f}d" if r['eta_days'] < 100
+                       else f"{r['eta_days'] / 30.44:.1f}mo")
         else:
             kcol = '—'
         print(f"{r['site'][:26]:26} {str(r['body'])[:16]:16} {r['score']:7.0f} {ycol:>29} {(own or '')[:14]:14}{flag} {kcol[:24]:24} {eta:>6} {d}")

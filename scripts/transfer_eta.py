@@ -114,6 +114,7 @@ def main():
     ap.add_argument('--dv-frac', type=float, default=0.975)
     ap.add_argument('--matrix', action='store_true',
                     help='fleets × targets grid (best ship per target); implies --fleet kits')
+    ap.add_argument('--json', action='store_true')
     args = ap.parse_args()
     from ti_config import require_faction
     args.faction = require_faction(args.faction)
@@ -144,8 +145,9 @@ def main():
 
     if args.matrix or len(fleets) > 1:
         # fleets × targets; best (fastest) ship per target
-        print(f"# ETA matrix — {len(fleets)} fleets × {len(targets)} targets "
-              f"(ΔV×{args.dv_frac}; model runs +0/−7% vs the in-game planner)")
+        if not args.json:
+            print(f"# ETA matrix — {len(fleets)} fleets × {len(targets)} targets "
+                  f"(ΔV×{args.dv_frac}; model runs +0/−7% vs the in-game planner)")
         best = {}
         grid = {}
         for nm, v in fleets:
@@ -160,6 +162,22 @@ def main():
                 grid[(nm, b)] = (t, d, mode)
                 if b not in best or t < best[b][0]:
                     best[b] = (t, nm, d, mode)
+        if args.json:
+            out = {'mode': 'matrix', 'dv_frac': args.dv_frac,
+                   'fleets': [n for n, _ in fleets], 'targets': []}
+            for b in targets:
+                row = {'target': b, 'found': b in pos, 'etas': [], 'best': None}
+                for n, _ in fleets:
+                    g = grid.get((n, b))
+                    row['etas'].append({'fleet': n,
+                                        'eta_weeks': g[0] / 604800 if g else None})
+                bb = best.get(b)
+                if bb:
+                    row['best'] = {'fleet': bb[1], 'eta_weeks': bb[0] / 604800,
+                                   'distance_au': bb[2] / AU, 'mode': bb[3]}
+                out['targets'].append(row)
+            print(json.dumps(out, indent=2, default=str))
+            return
         w = max(len(n) for n, _ in fleets) + 1
         print(f"{'target':18}" + ''.join(f"{n[:w-1]:>{w}}" for n, _ in fleets) + "   BEST")
         for b in targets:
@@ -177,17 +195,28 @@ def main():
 
     nm, fleet = fleets[0]
     a, budget, fp, dv = fleet_perf(fleet, ships, args.dv_frac)
-    print(f"# {nm}: a={a * 1000:.2f} mm/s² ({a / 9.81 * 1000:.2f} mg), "
-          f"ΔV {dv / 1000:.1f} kps × {args.dv_frac} = {budget / 1000:.1f} kps usable")
-    print(f"{'body':16} {'AU':>6} {'ETA wk':>7} {'ETA':>9} {'ΔV kps':>7}  mode   (±5%; in-game planner is truth)")
+    if not args.json:
+        print(f"# {nm}: a={a * 1000:.2f} mm/s² ({a / 9.81 * 1000:.2f} mg), "
+              f"ΔV {dv / 1000:.1f} kps × {args.dv_frac} = {budget / 1000:.1f} kps usable")
+        print(f"{'body':16} {'AU':>6} {'ETA wk':>7} {'ETA':>9} {'ΔV kps':>7}  mode   (±5%; in-game planner is truth)")
     rows = []
     for b in targets:
         if b not in pos:
-            print(f'{b:16} — not found')
+            if not args.json:
+                print(f'{b:16} — not found')
             continue
         d = math.dist(pos[b], fp)
         t, spent, mode = eta_seconds(d, a, budget)
         rows.append((t, b, d, spent, mode))
+    if args.json:
+        out = {'mode': 'fleet', 'fleet': nm, 'accel_mps2': a, 'dv_kps': dv / 1000,
+               'dv_frac': args.dv_frac, 'usable_dv_kps': budget / 1000,
+               'etas': [{'body': b, 'distance_au': d / AU, 'eta_weeks': t / 604800,
+                         'dv_spent_kps': spent / 1000, 'mode': mode}
+                        for t, b, d, spent, mode in sorted(rows)],
+               'not_found': [b for b in targets if b not in pos]}
+        print(json.dumps(out, indent=2, default=str))
+        return
     for t, b, d, spent, mode in sorted(rows):
         wk = t / 604800
         pretty = f'{t / 86400:.0f}d' if t < 120 * 86400 else f'{t / 86400 / 30.44:.1f}mo'

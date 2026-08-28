@@ -305,6 +305,7 @@ def main():
     ap.add_argument('--nations', default=None,
                     help='comma-separated nation templateNames for the Table H per-nation '
                          'columns (default: config anchor_nations, else auto-detect)')
+    ap.add_argument('--json', action='store_true', help='machine-readable output')
     a = ap.parse_args()
     from ti_config import require_faction
     a.faction = require_faction(a.faction)
@@ -320,41 +321,52 @@ def main():
     sr = SaveResearch(save)
     b = sr.breakdown(a.faction)
 
-    print(f"\n=== faction research income — {b['date']}  ({a.faction}) ===")
-    print(f"  HQ           {fmt_day(b['hq_day'])}")
-    print(f"  Councilors   {fmt_day(b['councilors_day'])}")
-    print(f"  Nations      {fmt_day(b['nations_day'])}")
-    print(f"  Habs         {fmt_day(b['habs_day'])}")
-    if b['unused_mc_day']:
-        print(f"  Unused MC    {fmt_day(b['unused_mc_day'])}")
-    print(f"  Distribution {fmt_day(b['dist_day'])}   [+{b['dist_pct']:.0%} of the above]")
-    print(f"  TOTAL        {fmt_day(b['total_day'])}   [in-game 🧪 tooltip figure]")
-    print(f"  (booked in ledger: {b['booked_day']:.1f}/day — excludes the distribution "
-          f"bonus & any same-day changes)")
+    if not a.json:
+        print(f"\n=== faction research income — {b['date']}  ({a.faction}) ===")
+        print(f"  HQ           {fmt_day(b['hq_day'])}")
+        print(f"  Councilors   {fmt_day(b['councilors_day'])}")
+        print(f"  Nations      {fmt_day(b['nations_day'])}")
+        print(f"  Habs         {fmt_day(b['habs_day'])}")
+        if b['unused_mc_day']:
+            print(f"  Unused MC    {fmt_day(b['unused_mc_day'])}")
+        print(f"  Distribution {fmt_day(b['dist_day'])}   [+{b['dist_pct']:.0%} of the above]")
+        print(f"  TOTAL        {fmt_day(b['total_day'])}   [in-game 🧪 tooltip figure]")
+        print(f"  (booked in ledger: {b['booked_day']:.1f}/day — excludes the distribution "
+              f"bonus & any same-day changes)")
 
-    print(f"\n  --- per-nation research (what {a.faction} receives) ---")
-    print(f"  {'nation':24s} {'research/mo':>11s} {'CPs':>7s} {'KS':>3s} {'→ player/mo':>12s} {'/day':>7s}")
-    for r in b['nation_rows']:
-        print(f"  {r['name'][:24]:24s} {r['research_month']:11.1f} "
-              f"{r['my_cps']:>3d}/{r['num_cps']:<3d} {'✓' if r['knowledge_sector'] else '·':>3s} "
-              f"{r['player_month']:12.1f} {r['player_month'] * 12 / DAYS_YR:7.2f}")
+        print(f"\n  --- per-nation research (what {a.faction} receives) ---")
+        print(f"  {'nation':24s} {'research/mo':>11s} {'CPs':>7s} {'KS':>3s} {'→ player/mo':>12s} {'/day':>7s}")
+        for r in b['nation_rows']:
+            print(f"  {r['name'][:24]:24s} {r['research_month']:11.1f} "
+                  f"{r['my_cps']:>3d}/{r['num_cps']:<3d} {'✓' if r['knowledge_sector'] else '·':>3s} "
+                  f"{r['player_month']:12.1f} {r['player_month'] * 12 / DAYS_YR:7.2f}")
 
     # rival columns for Table H, in the order HF,Init,Serv,Prot,Acad,Exod
     rival_computed = None
+    rival_rows = []
     if a.all_factions:
-        print("\n  --- rival factions (computed; Intel shows monthly research) ---")
+        if not a.json:
+            print("\n  --- rival factions (computed; Intel shows monthly research) ---")
         rival_computed = []
         for ftmpl in ('DestroyCouncil', 'ExploitCouncil', 'SubmitCouncil',
                       'AppeaseCouncil', 'CooperateCouncil', 'EscapeCouncil'):
             try:
                 rb = sr.breakdown(ftmpl, with_mc=False)
                 rival_computed.append(f"{rb['total_day'] * MO:,.0f}")
-                print(f"  {ftmpl:17s} {rb['total_day'] * MO:9.0f}/mo  "
-                      f"(nations {rb['nations_month']:7.0f}, counc {rb['councilors_day'] * MO:6.0f}, "
-                      f"habs {rb['habs_day'] * MO:6.0f}, dist {rb['dist_pct']:.0%})")
+                rival_rows.append({'faction': ftmpl, 'total_month': rb['total_day'] * MO,
+                                   'nations_month': rb['nations_month'],
+                                   'councilors_month': rb['councilors_day'] * MO,
+                                   'habs_month': rb['habs_day'] * MO,
+                                   'dist_pct': rb['dist_pct']})
+                if not a.json:
+                    print(f"  {ftmpl:17s} {rb['total_day'] * MO:9.0f}/mo  "
+                          f"(nations {rb['nations_month']:7.0f}, counc {rb['councilors_day'] * MO:6.0f}, "
+                          f"habs {rb['habs_day'] * MO:6.0f}, dist {rb['dist_pct']:.0%})")
             except Exception as ex:
                 rival_computed.append('?')
-                print(f"  {ftmpl:17s} — {ex}")
+                rival_rows.append({'faction': ftmpl, 'error': str(ex)})
+                if not a.json:
+                    print(f"  {ftmpl:17s} — {ex}")
 
     # Campaign-log timeline row (research-income table)
     anchors = er.resolve_anchor_nations(sr.gs, faction_template=a.faction,
@@ -378,6 +390,23 @@ def main():
     else:
         rv = ['?'] * 6
     hqc = (b['hq_day'] + b['councilors_day']) * MO
+    if a.json:
+        payload = {
+            'date': b['date'], 'faction': a.faction,
+            'income_day': {'hq': b['hq_day'], 'councilors': b['councilors_day'],
+                           'nations': b['nations_day'], 'habs': b['habs_day'],
+                           'unused_mc': b['unused_mc_day'], 'distribution': b['dist_day'],
+                           'total': b['total_day'], 'booked': b['booked_day']},
+            'dist_pct': b['dist_pct'], 'total_month': b['total_month'],
+            'nations_month': b['nations_month'], 'nation_rows': b['nation_rows'],
+            'rival_factions': rival_rows,
+            'table_h': {'anchors': [{'nation': t, 'research_month': rm}
+                                    for t, rm in zip(anchors, anchor_rms)],
+                        'habs_month': b['habs_day'] * MO, 'dist_month': b['dist_day'] * MO,
+                        'hq_councilors_month': hqc, 'rivals_month': rv},
+        }
+        print(json.dumps(payload, indent=2, default=str))
+        return
     labels = " / ".join(er.nation_label(t) for t in anchors)
     print(f"\n--- paste into Table H (research_month per nation; nations total = player share) ---")
     print(f"--- per-nation columns (anchors): {labels} — changing anchors mid-campaign "

@@ -61,9 +61,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('save')
     ap.add_argument('--faction', default=None)
+    ap.add_argument('--json', action='store_true')
     args = ap.parse_args()
     from ti_config import require_faction
     args.faction = require_faction(args.faction)
+    say = (lambda *a, **kw: None) if args.json else print
     save = load_save(args.save)
     gs = save['gamestates']
     mt = {m['dataName']: m for m in json.load(open(T('TIHabModuleTemplate.json')))}
@@ -81,8 +83,14 @@ def main():
     bodies = {bid: (bv.get('displayName') or bv.get('templateName') or '?')
               for bid, bv in kv(gs, 'TISpaceBodyState')}
 
-    print(f"# Boost analysis — {args.faction}")
-    print(f"Boost stockpile: {fac.get('resources', {}).get('Boost', 0):.1f}\n")
+    out = {'faction': args.faction,
+           'boost_stockpile': fac.get('resources', {}).get('Boost', 0),
+           'nation_income': {'rows': [], 'total_gross_month': 0.0},
+           'module_consumption': {'rows': [], 'total_powered_month': 0.0},
+           'administration': {'rows': [], 'reclaim_now_month': 0.0, 'avoid_later_month': 0.0},
+           'admin_tower_benefit': {'rows': [], 'dead_towers': 0, 'total_towers': 0}}
+    say(f"# Boost analysis — {args.faction}")
+    say(f"Boost stockpile: {fac.get('resources', {}).get('Boost', 0):.1f}\n")
 
     # --- income from nations (per-CP equal share) ---
     fac_cp, tot_cp = Counter(), Counter()
@@ -90,7 +98,7 @@ def main():
         nid = deref(cv.get('nation')); tot_cp[nid] += 1
         if deref(cv.get('faction')) == fac_id:
             fac_cp[nid] += 1
-    print("## Gross boost income from nations")
+    say("## Gross boost income from nations")
     gross = 0
     for nid in sorted(fac_cp, key=lambda n: -(nations.get(n, {}).get('historyBoost', [0])[0] or 0) * fac_cp[n] / max(tot_cp[n], 1)):
         nv = nations.get(nid, {})
@@ -98,12 +106,18 @@ def main():
         contrib = nb * fac_cp[nid] / tot_cp[nid] if tot_cp[nid] else 0
         gross += contrib
         if contrib > 0.05:
-            print(f"  {nv.get('templateName', nid):<14} CPs {fac_cp[nid]}/{tot_cp[nid]}  "
-                  f"nation {nb:5.1f}/mo  IP {nv.get('baseInvestmentPoints_month', 0):4.1f}  → +{contrib:5.1f}/mo")
-    print(f"  TOTAL gross from nations: {gross:.1f}/mo  (+ orgs, see report ledger)\n")
+            out['nation_income']['rows'].append({
+                'nation': nv.get('templateName', nid), 'cps_owned': fac_cp[nid],
+                'cps_total': tot_cp[nid], 'nation_boost_month': nb,
+                'ip_month': nv.get('baseInvestmentPoints_month', 0),
+                'contribution_month': contrib})
+            say(f"  {nv.get('templateName', nid):<14} CPs {fac_cp[nid]}/{tot_cp[nid]}  "
+                f"nation {nb:5.1f}/mo  IP {nv.get('baseInvestmentPoints_month', 0):4.1f}  → +{contrib:5.1f}/mo")
+    out['nation_income']['total_gross_month'] = gross
+    say(f"  TOTAL gross from nations: {gross:.1f}/mo  (+ orgs, see report ledger)\n")
 
     # --- ongoing module consumption, with Admin LEO-vs-not split ---
-    print("## Ongoing boost consumption (powered modules)")
+    say("## Ongoing boost consumption (powered modules)")
     powered = Counter(); building = Counter()
     admin_loc = defaultdict(lambda: Counter())  # template -> {('LEO'/'non-LEO', status): n}
     for _, mv in kv(gs, 'TIHabModuleState'):
@@ -131,24 +145,34 @@ def main():
         if powered[dn] + building[dn] == 0:
             continue
         pb = powered[dn] * boost_up[dn]; tot_p += pb
-        print(f"  {dn:<22} {boost_up[dn]} boost/mo × {powered[dn]:2} powered = {pb:5.1f}/mo "
-              f"({building[dn]} building → +{building[dn]*boost_up[dn]:.0f}/mo later)")
-    print(f"  TOTAL powered boost consumption: {tot_p:.1f}/mo\n")
+        out['module_consumption']['rows'].append({
+            'module': dn, 'boost_month_each': boost_up[dn], 'powered': powered[dn],
+            'powered_boost_month': pb, 'building': building[dn],
+            'building_boost_month_later': building[dn] * boost_up[dn]})
+        say(f"  {dn:<22} {boost_up[dn]} boost/mo × {powered[dn]:2} powered = {pb:5.1f}/mo "
+            f"({building[dn]} building → +{building[dn]*boost_up[dn]:.0f}/mo later)")
+    out['module_consumption']['total_powered_month'] = tot_p
+    say(f"  TOTAL powered boost consumption: {tot_p:.1f}/mo\n")
 
     # --- Administration LEO vs non-LEO (the trap) ---
-    print("## Administration modules: LEO (give CP cap) vs non-LEO (NO CP cap, only +Efficiency)")
+    say("## Administration modules: LEO (give CP cap) vs non-LEO (NO CP cap, only +Efficiency)")
     for dn, locs in admin_loc.items():
         srv = mt[dn].get('specialRulesValue', 0)
         for (leo, status), n in sorted(locs.items()):
             note = f"+{srv*100:.1f}% hab income only" if leo == 'non-LEO' else f"+{mt[dn].get('controlPointCapacity')} CP cap"
-            print(f"  {dn:<22} {leo:<12} {status:<9} ×{n:2}  ({n*boost_up[dn]:.0f} boost/mo; {note})")
+            out['administration']['rows'].append({
+                'module': dn, 'location': leo, 'status': status, 'count': n,
+                'boost_month': n * boost_up[dn], 'note': note})
+            say(f"  {dn:<22} {leo:<12} {status:<9} ×{n:2}  ({n*boost_up[dn]:.0f} boost/mo; {note})")
     # actionable: non-LEO powered admin towers reclaimable
     reclaim = sum(n * boost_up[dn] for dn, locs in admin_loc.items()
                   for (leo, status), n in locs.items() if leo == 'non-LEO' and status == 'powered')
     avoid = sum(n * boost_up[dn] for dn, locs in admin_loc.items()
                 for (leo, status), n in locs.items() if leo == 'non-LEO' and status == 'building')
-    print(f"\n  >> Power down non-LEO Administration modules → reclaim {reclaim:.0f} boost/mo NOW")
-    print(f"  >> Cancel non-LEO Administration modules under construction → avoid {avoid:.0f} boost/mo later")
+    out['administration']['reclaim_now_month'] = reclaim
+    out['administration']['avoid_later_month'] = avoid
+    say(f"\n  >> Power down non-LEO Administration modules → reclaim {reclaim:.0f} boost/mo NOW")
+    say(f"  >> Cancel non-LEO Administration modules under construction → avoid {avoid:.0f} boost/mo later")
 
     # --- per-hab Efficiency value: 5% of hab GROSS mining income (ground truth: TIHabState.cs:3364-3523,
     #     ×(1+specialRulesValue) on gross income of metals/nobles/water/vol/fissiles/money/research; powered only).
@@ -159,8 +183,8 @@ def main():
     hab_mods = defaultdict(list)
     for _, mv in kv(gs, 'TIHabModuleState'):
         hab_mods[deref(sectors.get(deref(mv.get('sector')), {}).get('hab'))].append(mv)
-    print("\n## Non-LEO Admin Towers ranked by ACTUAL +5% benefit (power down lowest first)")
-    print(f"  {'Hab':<24}{'Body':<14}{'metals/mo':>10}{'+5% metals':>11}{'verdict':>22}")
+    say("\n## Non-LEO Admin Towers ranked by ACTUAL +5% benefit (power down lowest first)")
+    say(f"  {'Hab':<24}{'Body':<14}{'metals/mo':>10}{'+5% metals':>11}{'verdict':>22}")
     admin_rows = []
     for _, mv in kv(gs, 'TIHabModuleState'):
         if mv.get('templateName') != 'AdministrationTower':
@@ -182,15 +206,23 @@ def main():
         admin_rows.append((hv.get('displayName'), body, metals))
     for hab, body, metals in sorted(admin_rows, key=lambda r: r[2]):
         verdict = 'DEAD — mine not live' if metals < 1 else f'{0.05*metals:.0f} metals/4 boost'
-        print(f"  {hab:<24.24}{body:<14.14}{metals:>10.0f}{0.05*metals:>11.1f}{verdict:>22}")
+        out['admin_tower_benefit']['rows'].append({
+            'hab': hab, 'body': body, 'metals_month': metals,
+            'benefit_metals_month': 0.05 * metals, 'verdict': verdict})
+        say(f"  {hab:<24.24}{body:<14.14}{metals:>10.0f}{0.05*metals:>11.1f}{verdict:>22}")
     dead = sum(1 for _, _, m in admin_rows if m < 1)
-    print(f"\n  {dead} of {len(admin_rows)} live non-LEO Towers produce ZERO benefit (mine still building) "
-          f"= {dead*4} boost/mo wasted for nothing → power those down first.")
+    out['admin_tower_benefit']['dead_towers'] = dead
+    out['admin_tower_benefit']['total_towers'] = len(admin_rows)
+    say(f"\n  {dead} of {len(admin_rows)} live non-LEO Towers produce ZERO benefit (mine still building) "
+        f"= {dead*4} boost/mo wasted for nothing → power those down first.")
 
-    print("\n## Priority-pip buildout (why it is NOT the fix)")
-    print(f"  Each LaunchFacilities cycle = {REQ_IP_BOO:.0f} IP, adds (4 − |lat|/25)×0.1 ≈ 0.22–0.31 boost/YEAR to 1 region.")
-    print(f"  ~1–3 completions/mo from heavy pips → fractions of a boost/mo gained per month. DECADES to matter.")
-    print(f"  If you must: rank YOUR nations by IP/month × low |latitude| — e.g. among the majors, CHINA > USA > RUSSIA (Russia worst: fewest IP + highest latitude).")
+    say("\n## Priority-pip buildout (why it is NOT the fix)")
+    say(f"  Each LaunchFacilities cycle = {REQ_IP_BOO:.0f} IP, adds (4 − |lat|/25)×0.1 ≈ 0.22–0.31 boost/YEAR to 1 region.")
+    say(f"  ~1–3 completions/mo from heavy pips → fractions of a boost/mo gained per month. DECADES to matter.")
+    say(f"  If you must: rank YOUR nations by IP/month × low |latitude| — e.g. among the majors, CHINA > USA > RUSSIA (Russia worst: fewest IP + highest latitude).")
+
+    if args.json:
+        print(json.dumps(out, indent=2, default=str))
 
 
 if __name__ == '__main__':

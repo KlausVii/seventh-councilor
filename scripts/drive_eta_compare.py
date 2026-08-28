@@ -73,6 +73,7 @@ def main():
     ap.add_argument("--mass-ratio", type=float, default=2.5, help="wet/dry (sets ΔV = EV·ln)")
     ap.add_argument("--dv-frac", type=float, default=0.975, help="fraction of ΔV the planner may spend")
     ap.add_argument("--routes", help='"name:AU,name:AU" (default: inner + deep)')
+    ap.add_argument("--json", action="store_true", help="machine-readable output")
     a = ap.parse_args()
 
     routes = DEFAULT_ROUTES
@@ -107,6 +108,21 @@ def main():
     if not rows:
         sys.exit("No drives matched (variant %s, filter %s)." % (suffix, a.drives))
     rows.sort(key=lambda r: r["wk"][0][0])       # fastest on the first route
+
+    if a.json:
+        payload = {
+            "reference_ship": {"variant": a.variant, "wet_t": a.wet_t,
+                               "mass_ratio": a.mass_ratio, "dv_frac": a.dv_frac},
+            "routes": [{"name": nm, "au": au} for nm, au in routes],
+            "drives": [{"name": r["name"], "ev_kps": r["ev"], "dv_kps": r["dv"],
+                        "cruise_accel_ms2": r["a"], "combat_mn": r["combat_mn"],
+                        "fuel_per_tank": r["fuel"],
+                        "route_etas": [{"route": nm, "weeks": wk, "mode": mode}
+                                       for (nm, _), (wk, mode) in zip(routes, r["wk"])]}
+                       for r in rows],
+        }
+        print(json.dumps(payload, indent=2, default=str))
+        return
 
     print("# Drive transit-time comparison (%s) — LESSONS-ships S23" % suffix)
     print("Reference ship: wet %.0f t, mass-ratio %s (ΔV = EV × %.3f); ΔV budget %s. "

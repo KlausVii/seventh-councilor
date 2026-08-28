@@ -26,7 +26,7 @@ Usage:
     python3 campaign_log_row.py <save.json> [--faction <templateName>] [--prev-cumulative N]
                                 [--nations 2026_USA,2026_CHN,2026_RUS]
 """
-import sys, os, argparse
+import sys, os, json, argparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import extract_snapshot as er
 
@@ -53,6 +53,7 @@ def main():
     ap.add_argument('--nations', default=None,
                     help='comma-separated nation templateNames for Table E '
                          '(default: config anchor_nations, else auto-detect)')
+    ap.add_argument('--json', action='store_true', help='machine-readable output')
     args = ap.parse_args()
     from ti_config import require_faction
     args.faction = require_faction(args.faction)
@@ -123,10 +124,13 @@ def main():
     nat = {tn: nv for _, nv in er.kv_items(gs, 'PavonisInteractive.TerraInvicta.TINationState')
            for tn in [nv.get('templateName')]}
     e_cells = []
+    e_rows = []
     for tname in anchor_templates:
         n = nat.get(tname, {})
         coh = n.get('cohesion'); rest = n.get('cohesionRestState_dailyCache')
         ineq = n.get('inequality'); gdp = (n.get('GDP') or 0) / 1e12
+        e_rows.append({'nation': tname, 'cohesion': coh, 'rest': rest,
+                       'inequality': ineq, 'gdp_trillions': gdp})
         e_cells += [f"{coh:.2f}" if coh is not None else '-',
                     f"{rest:.2f}" if rest is not None else '-',
                     f"{ineq:.2f}" if ineq is not None else '-',
@@ -149,6 +153,33 @@ def main():
                      if er.fac_id_from_field(h.get('faction')) == alien_id)
 
     # ---- emit ----
+    if args.json:
+        payload = {
+            'save': args.save, 'date': date, 'difficulty': difficulty,
+            'difficulty_mod': diff_mod, 'masking_projects_done': n_mask,
+            'table_a_alien_hate': {'hate': hate, 'mc_use': mc_use, 'hate_floor': floor,
+                                   'above_floor': above, 'xenoforming_removed': xeno,
+                                   'alien_kills': kills, 'alien_investigations': alien_inv,
+                                   'space_strength': space_str},
+            'table_b_buffer_days': [{'resource': k, 'days_cover': v}
+                                    for k, v in zip(RES_B, b_cells)],
+            'table_d_infrastructure': {'habs': n_habs, 'tier1': tier_ct[1],
+                                       'tier2': tier_ct[2], 'tier3': tier_ct[3],
+                                       'ships': n_ships, 'mass_kt': mass_kt, 'cps': cps,
+                                       'mc_use': mc_use, 'ops_command_centers': opsc,
+                                       'mines_active': len(mi['active']),
+                                       'mines_off': len(mi['off']),
+                                       'mines_building': len(mi['building'])},
+            'table_e_nation_health': e_rows,
+            'table_f_faction': {'this_month': this_mo, 'cumulative': cumulative,
+                                'top_rival_research_stale': top_rival,
+                                'alien_ships': alien_ships, 'alien_habs': alien_habs,
+                                'ships': n_ships, 'habs': n_habs, 'cps': cps},
+            'table_g_tech': {'finished_global_techs': n_global,
+                             'finished_faction_projects': n_proj},
+        }
+        print(json.dumps(payload, indent=2, default=str))
+        return
     print(f"# Save: {args.save}")
     print(f"# Game date: {date}  Difficulty: {difficulty} (mod {diff_mod})  Masking projects done: {n_mask}\n")
     print("### Table A")

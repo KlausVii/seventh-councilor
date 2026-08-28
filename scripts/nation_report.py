@@ -13,6 +13,7 @@ Usage:
                                                            # + project research/IP at cohesion
                                                            # recovery (×rest/current) and a
                                                            # months-to-rest ETA (LESSONS-politics C21)
+    python3 nation_report.py 2026_CHN ... --json           # machine-readable output (any mode)
 
 Identify nations by templateName ('2026_USA'...), never displayName — displayName
 renames on federation/annexation (see docs/lessons/REFERENCE.md). A displayName is
@@ -148,7 +149,18 @@ def rows_for(nation):
     return rows
 
 
-def report(nation, path):
+def report(nation, path, json_out=False):
+    if json_out:
+        op = nation.get("publicOpinion") or {}
+        return {
+            "nation": nation.get("displayName"),
+            "template_name": nation.get("templateName"),
+            "save": os.path.basename(path),
+            "scores": [{"label": label, "value": val}
+                       for label, val, _ in rows_for(nation)],
+            "public_opinion": {i: op.get(i, 0) for i in IDEOLOGIES
+                               if op.get(i, 0) >= 0.005},
+        }
     print(f"# {nation.get('displayName')} ({nation.get('templateName')}) — "
           f"{os.path.basename(path)}")
     for label, val, kind in rows_for(nation):
@@ -161,7 +173,16 @@ def report(nation, path):
     print("  truth for any disagreement (LESSONS-process P1, LESSONS-politics C18).")
 
 
-def diff(nation_a, nation_b, path_a, path_b):
+def diff(nation_a, nation_b, path_a, path_b, json_out=False):
+    if json_out:
+        return {
+            "nation": nation_b.get("displayName"),
+            "template_name": nation_b.get("templateName"),
+            "before_date": save_date(path_a), "after_date": save_date(path_b),
+            "rows": [{"label": label, "before": va, "after": vb}
+                     for (label, va, _), (_, vb, _)
+                     in zip(rows_for(nation_a), rows_for(nation_b))],
+        }
     print(f"# {nation_b.get('displayName')} ({nation_b.get('templateName')}) — "
           f"{save_date(path_a)} vs {save_date(path_b)}")
     print(f"  {'score':34} {'before':>14} {'after':>14} {'change':>12}")
@@ -186,11 +207,30 @@ def _date_delta_days(p0, p1):
     return (b - a).days if a and b else None
 
 
-def recovery(nat_now, path_now, nat_prior=None, path_prior=None):
+def recovery(nat_now, path_now, nat_prior=None, path_prior=None, json_out=False):
     """Project research & IP once cohesion recovers to its rest state, and (with an earlier
     post-event save) estimate WHEN. Research/IP scale ~linearly with cohesion (LESSONS-politics
     C21): value_at_rest ≈ current × (rest / current_cohesion)."""
     coh = nat_now.get("cohesion"); rest = nat_now.get("cohesionRestState_dailyCache")
+    if json_out:
+        if coh is None or rest is None or coh <= 0:
+            return {"error": "cohesion / cohesionRestState_dailyCache unavailable"}
+        factor = rest / coh
+        research = head(nat_now, "historyResearch") or 0.0
+        ip = nat_now.get("baseInvestmentPoints_month") or 0.0
+        gap = rest - coh
+        out = {"cohesion": coh, "rest_state": rest, "gap": gap, "factor": factor,
+               "research_month": research, "research_month_at_rest": research * factor,
+               "ip_month": ip, "ip_month_at_rest": ip * factor,
+               "note": "estimate — linearity inferred (C21); in-game is truth"}
+        if nat_prior is not None and gap > 0.01:
+            coh0 = nat_prior.get("cohesion"); dd = _date_delta_days(path_prior, path_now)
+            if coh0 is not None and dd and dd > 0:
+                rate = (coh - coh0) / dd
+                if rate > 1e-4:
+                    out["cohesion_per_month"] = rate * 30.44
+                    out["months_to_rest"] = gap / rate / 30.44
+        return out
     print("\n## Recovery projection — research & IP scale ~linearly with cohesion (C21)")
     if coh is None or rest is None or coh <= 0:
         print("  cohesion / cohesionRestState_dailyCache unavailable — cannot project."); return
@@ -223,17 +263,37 @@ def recovery(nat_now, path_now, nat_prior=None, path_prior=None):
     print("  [estimate — linearity inferred from the IP model + flat-through-crash research; in-game is truth]")
 
 
-def scan(name, paths, watch=None):
+def scan(name, paths, watch=None, json_out=False):
     cols = f"{'date':>10} {'file#':>7} {'regions':>7} {'GDP $T':>8} {'unrest':>7} " \
            f"{'cohesn':>7} {'IP/mo':>7} {'res[0]':>8} {'MC[0]':>6}"
     if watch:
         cols += f" {watch + ' regions':>14}"
-    print(cols)
+    if not json_out:
+        print(cols)
+    rows_out = []
     for p in sorted(paths, key=counter):
         gs = load_save(p)["gamestates"]
         nat = find_nation(gs, name)
         if nat is None:
-            print(f"{save_date(p):>10} — nation {name} not found")
+            if json_out:
+                rows_out.append({"date": save_date(p),
+                                 "error": f"nation {name} not found"})
+            else:
+                print(f"{save_date(p):>10} — nation {name} not found")
+            continue
+        if json_out:
+            r = {"date": save_date(p), "file": counter(p) % 10**7,
+                 "regions": len(nat.get("regions") or []),
+                 "gdp": nat.get("GDP") or 0,
+                 "unrest": nat.get("unrest", 0), "cohesion": nat.get("cohesion", 0),
+                 "ip_month": nat.get("baseInvestmentPoints_month", 0),
+                 "research_month_head": head(nat, "historyResearch") or 0,
+                 "mc_head": head(nat, "historyMissionControl") or 0}
+            if watch:
+                w = find_nation(gs, watch)
+                r["watch"] = watch
+                r["watch_regions"] = len(w.get("regions") or []) if w else None
+            rows_out.append(r)
             continue
         row = (f"{save_date(p):>10} {counter(p) % 10**7:>7} "
                f"{len(nat.get('regions') or []):>7} "
@@ -246,6 +306,8 @@ def scan(name, paths, watch=None):
             w = find_nation(gs, watch)
             row += f" {len(w.get('regions') or []) if w else '-':>14}"
         print(row)
+    if json_out:
+        return {"nation": name, "rows": rows_out}
 
 
 def main(argv):
@@ -258,6 +320,10 @@ def main(argv):
     if "--recovery" in rest:
         recov = True
         rest = [x for x in rest if x != "--recovery"]
+    json_out = False
+    if "--json" in rest:
+        json_out = True
+        rest = [x for x in rest if x != "--json"]
     watch = None
     if "--watch" in rest:
         i = rest.index("--watch")
@@ -270,7 +336,9 @@ def main(argv):
         paths = glob.glob(str(save_dir) + "/*" + rest[1] + "*")
         if not paths:
             raise SystemExit(f"No saves match {rest[1]!r} in {save_dir}")
-        scan(name, paths, watch)
+        result = scan(name, paths, watch, json_out)
+        if json_out:
+            print(json.dumps(result, indent=2, default=str))
         return 0
     if not rest:
         from ti_config import newest_save
@@ -283,6 +351,12 @@ def main(argv):
         nat = find_nation(gs, name)
         if nat is None:
             raise SystemExit(f"Nation {name!r} not found in {rest[0]}")
+        if json_out:
+            payload = report(nat, rest[0], json_out=True)
+            if recov:
+                payload["recovery"] = recovery(nat, rest[0], json_out=True)
+            print(json.dumps(payload, indent=2, default=str))
+            return 0
         report(nat, rest[0])
         if recov:
             recovery(nat, rest[0])
@@ -291,11 +365,19 @@ def main(argv):
         na, nb = find_nation(a, name), find_nation(b, name)
         if na is None or nb is None:
             raise SystemExit(f"Nation {name!r} missing from one of the saves")
+        if json_out:
+            payload = diff(na, nb, rest[0], rest[1], json_out=True)
+            if recov:
+                payload["recovery"] = recovery(nb, rest[1], na, rest[0], json_out=True)
+            print(json.dumps(payload, indent=2, default=str))
+            return 0
         diff(na, nb, rest[0], rest[1])
         if recov:
             recovery(nb, rest[1], na, rest[0])
     else:
-        scan(name, rest, watch)
+        result = scan(name, rest, watch, json_out)
+        if json_out:
+            print(json.dumps(result, indent=2, default=str))
     return 0
 
 
