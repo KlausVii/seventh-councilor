@@ -25,12 +25,7 @@ from ti_config import _REPO_ROOT, newest_save
 DIFFICULTY_NAMES = {1: "Cinematic", 2: "Normal", 3: "Veteran", 4: "Brutal"}
 
 
-def load_save(path: Path) -> dict:
-    if str(path).endswith(".gz"):
-        with gzip.open(path, "rt", encoding="utf-8-sig") as f:
-            return json.load(f)
-    with open(path, encoding="utf-8-sig") as f:
-        return json.load(f)
+from ti_config import load_save  # THE shared loader: gzip magic + BOM, memoized
 
 
 def detect(save_path: Path) -> dict:

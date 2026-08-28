@@ -81,15 +81,9 @@ FARM_MODULES = {'Farm'}
 FARM_WATER_OFFSET_MONTH = 19.1
 
 
-def load_save(path):
-    with open(path, 'rb') as f:
-        magic = f.read(2)
-    # utf-8-sig: some saves (esp. .gz) carry a UTF-8 BOM that plain utf-8 rejects
-    if magic == b'\x1f\x8b':
-        with gzip.open(path, 'rt', encoding='utf-8-sig') as f:
-            return json.load(f)
-    with open(path, 'r', encoding='utf-8-sig') as f:
-        return json.load(f)
+# THE loader lives in ti_config (gzip magic + BOM handling + per-process
+# memoization); re-exported here because several analyzers import it from us.
+from ti_config import load_save  # noqa: F401
 
 
 def kv_items(gs, key_suffix):

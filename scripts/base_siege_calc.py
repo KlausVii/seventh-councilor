@@ -46,10 +46,7 @@ KINETIC_NUM2 = {  # per mount, Mk3 tier
 }
 
 
-def load_save(path):
-    op = gzip.open if path.endswith('.gz') else open
-    with op(path, 'rt', encoding='utf-8-sig') as f:
-        return json.load(f)
+from ti_config import load_save  # THE shared loader: gzip magic + BOM, memoized
 
 
 def tally_base(save_path, base_name):

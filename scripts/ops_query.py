@@ -63,13 +63,7 @@ def key(k):
     return k["value"] if isinstance(k, dict) else k
 
 
-def load_save(path):
-    if path.endswith(".gz"):
-        import gzip
-        with gzip.open(path, "rt", encoding="utf-8-sig") as f:
-            return json.load(f)
-    with open(path, encoding="utf-8-sig") as f:
-        return json.load(f)
+from ti_config import load_save  # THE shared loader: gzip magic + BOM, memoized
 
 
 def dt(d):

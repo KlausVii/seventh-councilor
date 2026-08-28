@@ -84,14 +84,7 @@ IDEOLOGIES = ["Resist", "Exploit", "Escape", "Cooperate", "Appease", "Submit",
               "Destroy", "Undecided"]
 
 
-def load_save(path):
-    # P3: sniff gzip magic bytes, don't trust the extension.
-    # utf-8-sig: some saves (esp. .gz) carry a UTF-8 BOM that plain utf-8 rejects.
-    with open(path, "rb") as f:
-        magic = f.read(2)
-    op = gzip.open if magic == b"\x1f\x8b" else open
-    with op(path, "rt", encoding="utf-8-sig") as f:
-        return json.load(f)
+from ti_config import load_save  # THE shared loader: gzip magic + BOM, memoized
 
 
 def counter(path):

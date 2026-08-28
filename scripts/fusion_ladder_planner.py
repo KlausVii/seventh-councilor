@@ -53,13 +53,7 @@ FAMILY_ALIASES = {
 }
 
 
-def load_save(p):
-    with open(p, 'rb') as f:
-        magic = f.read(2)
-    op = gzip.open if magic == b'\x1f\x8b' else open
-    # utf-8-sig: saves written on Windows carry a UTF-8 BOM (inside the gz too)
-    with op(p, 'rt', encoding='utf-8-sig') as f:
-        return json.load(f)
+from ti_config import load_save  # THE shared loader: gzip magic + BOM, memoized
 
 
 def kv(gs, suf):

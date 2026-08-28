@@ -18,11 +18,7 @@ from pathlib import Path
 
 TPL_DIR = Path(__file__).parent / 'templates'
 
-def load_save(path):
-    raw = open(path, 'rb').read()
-    if raw[:2] == b'\x1f\x8b':
-        raw = gzip.decompress(raw)
-    return json.loads(raw)
+from ti_config import load_save  # THE shared loader: gzip magic + BOM, memoized
 
 def main():
     ap = argparse.ArgumentParser()

@@ -41,12 +41,7 @@ T = lambda f: os.path.join(HERE, 'templates', f)
 BOOST_EQ, BOOST_LAT_DIV, S2T, REQ_IP_BOO = 4.0, 25.0, 0.1, 2.0
 
 
-def load_save(p):
-    with open(p, 'rb') as f:
-        magic = f.read(2)
-    op = gzip.open if magic == b'\x1f\x8b' else open
-    with op(p, 'rt', encoding='utf-8-sig') as f:  # BOM: Windows saves
-        return json.load(f)
+from ti_config import load_save  # THE shared loader: gzip magic + BOM, memoized
 
 
 def kv(gs, suf):

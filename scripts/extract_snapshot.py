@@ -368,24 +368,9 @@ DRIVE_TO_TIER = {d: tier for tier, drives in DRIVE_TIERS for d in drives}
 # Save-file helpers
 # ---------------------------------------------------------------------------
 
-def load_save(path):
-    """Load a TI save file. Supports both raw .json saves AND gzip-compressed
-    .gz saves (Terra Invicta uses gzip for older saves in the user's save
-    directory; the file extension and the gzip magic bytes both indicate it).
-    """
-    import gzip
-    path = str(path)
-    if path.endswith('.gz'):
-        with gzip.open(path, 'rb') as f:
-            return json.loads(f.read())
-    # Sniff magic bytes: 0x1f 0x8b = gzip even if not .gz extension
-    with open(path, 'rb') as f:
-        head = f.read(2)
-    if head == b'\x1f\x8b':
-        with gzip.open(path, 'rb') as f:
-            return json.loads(f.read())
-    with open(path, 'r', encoding='utf-8-sig') as f:  # BOM: Windows saves
-        return json.load(f)
+# THE loader lives in ti_config (gzip magic + BOM handling + per-process
+# memoization); re-exported here because most analyzers import it from us.
+from ti_config import load_save  # noqa: F401
 
 
 def kv_items(gs, state_key):

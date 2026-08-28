@@ -16,6 +16,7 @@ Usage from any script in this folder:
 
 from __future__ import annotations
 
+import gzip
 import json
 import os
 from pathlib import Path
@@ -121,6 +122,42 @@ def newest_save(save_dir: Path | None = None) -> Path | None:
         reverse=True,
     )
     return saves[0] if saves else None
+
+
+# ---------------------------------------------------------------------------
+# Save loading — THE one loader (P3). Every script imports this instead of
+# defining its own: gzip is detected by magic bytes (the extension lies), and
+# the text is decoded as utf-8-sig because some saves — including inside .gz —
+# carry a UTF-8 BOM that plain utf-8/json.loads(bytes) rejects.
+# ---------------------------------------------------------------------------
+
+# Parses are memoized by (realpath, mtime, size) so a batch of analyzers run in
+# ONE process (scripts/tic.py) parses a 60–90 MB save once, not once per tool.
+# Capped at two entries: diff workflows hold two saves; multi-save scans must
+# not accumulate twenty parsed saves in memory. Analyzers are read-only by
+# convention — a caller that mutates the returned dict would poison later
+# cache hits in the same process, so don't.
+_SAVE_CACHE: dict[tuple, dict] = {}
+_SAVE_CACHE_MAX = 2
+
+
+def load_save(path) -> dict:
+    """Parse a Terra Invicta save (.json or .gz), memoized per process."""
+    p = os.path.realpath(str(path))
+    st = os.stat(p)
+    key = (p, st.st_mtime_ns, st.st_size)
+    hit = _SAVE_CACHE.get(key)
+    if hit is not None:
+        return hit
+    with open(p, "rb") as f:
+        raw = f.read()
+    if raw[:2] == b"\x1f\x8b":
+        raw = gzip.decompress(raw)
+    obj = json.loads(raw.decode("utf-8-sig"))
+    while len(_SAVE_CACHE) >= _SAVE_CACHE_MAX:
+        _SAVE_CACHE.pop(next(iter(_SAVE_CACHE)))
+    _SAVE_CACHE[key] = obj
+    return obj
 
 
 # ---------------------------------------------------------------------------

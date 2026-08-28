@@ -27,11 +27,7 @@ SPECIMEN_RULES = {'Griffins': 'AccessLiveGriffin', 'WarDogs': 'AccessWarDogCorpu
 def key(k):
     return k['value'] if isinstance(k, dict) else k
 
-def load_save(path):
-    raw = open(path, 'rb').read()
-    if raw[:2] == b'\x1f\x8b':
-        raw = gzip.decompress(raw)
-    return json.loads(raw)
+from ti_config import load_save  # THE shared loader: gzip magic + BOM, memoized
 
 def fleet_name(v, my_fid):
     """Player fleet names live in displayNameByFaction (per-faction map); displayName is
