@@ -12,12 +12,12 @@ agent at all** — that's a supported way to use this, not a fallback.
 
 ## What the scripts themselves do
 
-Counts below are for the 41 files in `scripts/`, and you can verify every one yourself in a
+Counts below are for the 43 files in `scripts/`, and you can verify every one yourself in a
 few seconds — see [Audit it yourself](#audit-it-yourself).
 
 | | Count | Which |
 |---|---|---|
-| **Read-only and fully offline** | **34 of 41** | every save analyzer |
+| **Read-only and fully offline** | **35 of 43** | every save analyzer, plus the `tic.py` dispatcher that runs them |
 | Make any network call | **1** | `fetch_ladder.py` — fetches wiki/forum pages when researching a mechanic. Not part of save analysis |
 | Use `subprocess` | **1** | same file |
 | Write anything | **7** | `extract_snapshot.py`, `save_trajectory.py` (report output) · `generate_vault.py`, `generate_modules.py` (`generated/` pages) · `setup_campaign.py` (`config.json`) · `sync_game_data.py` (copies game templates *from* your install) · `ti_war_editor.py` (see below) |
@@ -123,6 +123,16 @@ grep -rlE "open\([^)]*['\"][wa]|shutil\.(copy|move|rmtree)|os\.(remove|unlink|re
 # Third-party imports — expect none
 grep -rhoE "^\s*(import|from) [a-zA-Z0-9_]+" scripts/*.py | awk '{print $2}' | sort -u
 ```
+
+Or run the test suite — `tests/run_all.py` asserts the three claims above structurally
+(via the Python AST, so a docstring can't false-positive a grep) and fails if any script
+grows a network call, a third-party import, or an undocumented file write:
+
+```bash
+python3 tests/run_all.py
+```
+
+It needs no save, no game data, and no network, and finishes in a few seconds.
 
 Reviews are genuinely welcome, and so are hardening PRs — see
 [CONTRIBUTING.md](CONTRIBUTING.md).

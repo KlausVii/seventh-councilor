@@ -54,8 +54,17 @@ already extracts the field.
 
 ## Script inventory (run these FIRST)
 
+Running several analyzers on the same save? Batch them through the dispatcher so the
+60–90 MB save is parsed ONCE per batch, not once per tool (`ti_config.load_save` memoizes
+per process): `python3 scripts/tic.py snapshot --brief :: audit :: power --all`. Aliases:
+`tic.py list`. It refuses to dispatch `ti_war_editor.py` — save edits stay explicit.
+Every analyzer accepts `--json` (machine-readable, same rows AND same redactions as the
+human report) except `ops_query.py` and the two `generate_*` page writers.
+After changing any script, run `python3 tests/run_all.py` (seconds, no save needed).
+
 | Script                                                                            | Use for                                                                                                                                                                                        |
 | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tic.py <alias> [args] [:: <alias> [args] …]`                                     | Dispatcher for everything below: short aliases + `::`-separated batches sharing ONE parsed save. `tic.py list` = alias table. Won't dispatch the save editor                                   |
 | `extract_snapshot.py <save\|--newest> [--faction X] [-o out] [--brief] [--json]`  | THE first pass: factions, buffers, MC + latent demand, mines, councilors/orgs, nations, LEO saturation, fleets/refits, alien hate, threats, research state, victory chain, unlockable projects |
 | `base_fix_audit.py [save] [--top N] [--sort days\|metals] [--scarce-only] [--json]` | THE recurring hab-turn report in ONE save pass: unpowered modules worth flipping (boost-free first, E37), habs with no OC/CC (in-flight vs real gaps), OC→CC ranked by build TIME + power-gated, mine tier upgrades (0 MC) vs new mines (quadratic margin). Delegates to the individual tools — run this first for "what should I click on my bases?" |
 | `mine_completion_timeline.py`                                                     | ANY absolute mine-output/ETA number, water timeline                                                                                                                                            |

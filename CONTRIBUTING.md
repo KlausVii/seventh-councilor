@@ -54,6 +54,16 @@ contributions exactly as it applies to answers.
 - **Never commit game data.** `scripts/templates/` and `scripts/localization/` are mirrored
   from each user's own install and are gitignored. The repo ships no Pavonis assets and must
   stay that way.
+- **Load saves through `ti_config.load_save`.** Don't define a loader in your script — the
+  shared one handles gzip-by-magic-bytes, the UTF-8 BOM some saves carry, and memoizes so
+  `tic.py` batches parse the save once.
+- **Analyzers speak `--json` too.** A new analyzer should offer `--json` emitting the same
+  rows the human report prints — same numbers, same redactions (the spoiler policy applies
+  to JSON exactly as to text).
+- **Run the tests before you open the PR:** `python3 tests/run_all.py` — a few seconds, no
+  save or game data needed. It compile-checks every script, checks every `--help`, and
+  enforces the security claims in `SECURITY.md` (no network, no third-party imports, no
+  undocumented file writes).
 
 Tell your agent to read `CONTRIBUTING.md` and `CLAUDE.md` first and it will follow most of
 this without being asked.
