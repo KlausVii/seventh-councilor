@@ -1153,6 +1153,9 @@ def extract_councilor_roster(gs, faction_id):
     fs_player = next((fv for fid, fv in kv_items(gs, 'PavonisInteractive.TerraInvicta.TIFactionState')
                       if fid == faction_id), {})
     money = (fs_player.get('resources', {}) or {}).get('Money', 0) or 0
+    gv_rows = gs.get('PavonisInteractive.TerraInvicta.TIGlobalValuesState') or []
+    gv = (gv_rows[0].get('Value') or {}) if gv_rows else {}
+    nuclear_weapons_used = (gv.get('nuclearStrikes', 0) or 0) > 0
 
     STATS = ['Persuasion', 'Investigation', 'Espionage', 'Command',
              'Administration', 'Science', 'Security']
@@ -1200,6 +1203,17 @@ def extract_councilor_roster(gs, faction_id):
                     elif 'fInequality' in ct:
                         v = nation.get('inequality', 0) or 0
                         apply_it = (v <= cv) if 'Less' in cs else (v >= cv)
+                    elif 'fCohesion' in ct:
+                        v = nation.get('cohesion', 0) or 0
+                        apply_it = (v >= cv) if 'Greater' in cs else (v <= cv)
+                    elif 'fEducation' in ct:
+                        v = nation.get('education', 0) or 0
+                        apply_it = (v >= cv) if 'Greater' in cs else (v <= cv)
+                    elif 'fUnrest' in ct:
+                        v = nation.get('unrest', 0) or 0
+                        apply_it = (v >= cv) if 'Greater' in cs else (v <= cv)
+                    elif 'bNuclearWeaponsUsed' in ct:
+                        apply_it = nuclear_weapons_used if str_v == 'TRUE' else (not nuclear_weapons_used)
                     elif 'bInHomeNation' in ct:
                         apply_it = in_home if str_v == 'TRUE' else (not in_home)
                     elif 'efResourceValue' in ct:
@@ -1836,6 +1850,18 @@ def extract_leo_slot_capacity(gs, faction_id):
     return rows
 
 
+# The two contiguous `UI.Nation.Priority_*` localization key blocks: this set is the
+# first ("national") block — Economy through Spoils. Everything else (Funding,
+# MissionControl, LaunchFacilities, Civilian_InitiateSpaceflightProgram, every
+# Military_Build*/Initiate*/Found* variant) is the second ("space program") block.
+# The in-game priorities screen shows each category's % share within its OWN block,
+# not against the combined pip total across both — see extract_nation_investment_dashboard.
+NATIONAL_PRIORITY_CATEGORIES = {
+    'Economy', 'Welfare', 'Environment', 'Unity', 'Government',
+    'Knowledge', 'Military', 'Oppression', 'Spoils',
+}
+
+
 def extract_nation_investment_dashboard(gs, faction_id):
     """Per-nation snapshot of what determines monthly investment points (IP) +
     the pip distribution the player has set on their CPs.
@@ -1939,6 +1965,21 @@ def extract_nation_investment_dashboard(gs, faction_id):
                                        if k not in dead_pips}
         total_pips_effective = sum(effective_pips_by_category.values())
         dead_pips_total = sum(dead_pips.values())
+        # The in-game priorities screen splits categories into two independent pip
+        # pools — "national" (Economy/Welfare/Environment/Unity/Government/Knowledge/
+        # Military/Oppression/Spoils) and "space program" (Funding/MissionControl/
+        # LaunchFacilities/Civilian_InitiateSpaceflightProgram/Military_Build*/
+        # Military_InitiateNuclearProgram/Military_FoundMilitary) — confirmed by the
+        # two contiguous blocks of `UI.Nation.Priority_*` localization keys. A
+        # category's displayed % share is of its OWN pool, not the combined total
+        # (verified: Mexico Welfare 10 pips / 33 national-pool pips = 30% ≈ the
+        # in-game 31% reading, not 10/89=11% against the combined pool).
+        domestic_pips = {k: v for k, v in effective_pips_by_category.items()
+                          if k in NATIONAL_PRIORITY_CATEGORIES}
+        space_pips = {k: v for k, v in effective_pips_by_category.items()
+                      if k not in NATIONAL_PRIORITY_CATEGORIES}
+        total_pips_domestic = sum(domestic_pips.values())
+        total_pips_space = sum(space_pips.values())
 
         dashboard.append({
             'nation_id': nat,
@@ -1985,6 +2026,8 @@ def extract_nation_investment_dashboard(gs, faction_id):
                                         for r in (nv.get('advisingCouncilors') or [])],
             'total_pips_set': total_pips_set,
             'total_pips_effective': total_pips_effective,
+            'total_pips_domestic': total_pips_domestic,
+            'total_pips_space': total_pips_space,
             'pip_distribution': dict(pip_total_by_category),
             'pip_distribution_effective': dict(effective_pips_by_category),
             'cps': cps,
@@ -5326,22 +5369,29 @@ def format_markdown(snapshot, brief=False):
         # inert post-founding pips) for share + IP/mo math. Raw totals would
         # over-inflate the denominator and understate real priorities.
         L.append("### Pip distribution per nation (effective allocation, excluding inert pips)")
-        L.append("Each pip's share of IP = pip_count / effective_total (inert post-founding")
-        L.append("pips excluded from denominator since they don't compete for IP). To raise a")
-        L.append("category's share, add pips there or remove pips from competing categories.")
+        L.append("Each pip's share is of its OWN pool — the in-game priorities screen runs two")
+        L.append("independent pip pools per nation, **national** (Economy/Welfare/Environment/")
+        L.append("Unity/Government/Knowledge/Military/Oppression/Spoils) and **space program**")
+        L.append("(Funding/MissionControl/Boost/Military_Build*/Initiate*/Found*) — a category's")
+        L.append("% share is pip_count / that pool's total, NOT the combined total across both")
+        L.append("(inert post-founding pips excluded from every denominator). To raise a")
+        L.append("category's share, add pips there or remove pips from others in the SAME pool.")
         L.append("")
         for n in nd:
             effective_total = n.get('total_pips_effective', 0)
             if effective_total == 0:
                 continue
             pip_dist = n.get('pip_distribution_effective') or n['pip_distribution']
+            total_domestic = n.get('total_pips_domestic', 0)
+            total_space = n.get('total_pips_space', 0)
             L.append(f"**{n['nation_name']}** — {n['n_cps']} CPs, "
-                     f"{effective_total} effective pips"
+                     f"{total_domestic} national + {total_space} space-program pips"
                      + (f" ({n.get('dead_pips_total',0)} inert excluded)" if n.get('dead_pips_total',0) > 0 else "")
                      + f", {n['ip_per_month']:.1f} IP/mo")
             sorted_pips = sorted(pip_dist.items(), key=lambda x: -x[1])
             for cat, pips in sorted_pips:
-                share = pips / effective_total * 100 if effective_total else 0
+                pool_total = total_domestic if cat in NATIONAL_PRIORITY_CATEGORIES else total_space
+                share = pips / pool_total * 100 if pool_total else 0
                 ip_to_cat = pips * n['ip_per_month'] / effective_total if effective_total else 0
                 L.append(f"  - {cat}: **{pips} pips** ({share:.0f}% share, ~{ip_to_cat:.1f} IP/mo)")
             L.append("")
