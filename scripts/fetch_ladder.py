@@ -50,6 +50,14 @@ import subprocess
 import sys
 import urllib.parse
 
+# Windows cp1252 console: this script writes FETCHED WEB CONTENT to stdout,
+# which is guaranteed to contain non-cp1252 characters sooner or later — and it
+# imports no ti_config, so the central reconfigure never runs here.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
